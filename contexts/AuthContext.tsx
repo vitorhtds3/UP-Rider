@@ -1,0 +1,270 @@
+import React, { createContext, useState, useEffect, ReactNode } from 'react';
+import { AppState } from 'react-native';
+import * as Location from 'expo-location';
+import { Session } from '@supabase/supabase-js';
+import { supabase } from '@/services/supabase';
+import { registerForPushNotifications, removePushToken } from '@/services/notifications';
+
+export interface Entregador {
+  id: string;
+  user_id: string;
+  nome: string;
+  email: string;
+  telefone: string;
+  veiculo: string;
+  foto: string;
+  status: 'online' | 'offline';
+  ganhos_dia: number;
+  entregas_hoje: number;
+  driver_id?: string;
+  role?: string;
+  accountStatus?: string;
+}
+
+interface AuthContextType {
+  entregador: Entregador | null;
+  session: Session | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (email: string, senha: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => Promise<void>;
+  updateEntregador: (data: Partial<Entregador>) => void;
+}
+
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [entregador, setEntregador] = useState<Entregador | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Handle app state for session refresh
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        supabase.auth.startAutoRefresh();
+      } else {
+        supabase.auth.stopAutoRefresh();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
+  // Initialize session
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session?.user) {
+        fetchEntregadorData(session.user.id);
+      } else {
+        setIsLoading(false);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session?.user) {
+        fetchEntregadorData(session.user.id);
+      } else {
+        setEntregador(null);
+        setIsLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchEntregadorData = async (userId: string) => {
+    try {
+      // Fetch user data from public.users table
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (userError || !userData) {
+        setIsLoading(false);
+        return;
+      }
+
+      // Fetch driver data
+      const { data: driverData } = await supabase
+        .from('drivers')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      // Compute today's earnings from completed orders
+      const today = new Date().toISOString().split('T')[0];
+      const { data: ordersToday } = await supabase
+        .from('orders')
+        .select('total')
+        .eq('driver_id', userId)
+        .eq('status', 'delivered')
+        .gte('created_at', today);
+
+      const ganhosDia = (ordersToday || []).reduce((sum: number, o: any) => sum + (Number(o.delivery_fee) || Number(o.total) * 0.15 || 0), 0);
+
+      // Count today's deliveries
+      const { count: entregasHoje } = await supabase
+        .from('orders')
+        .select('*', { count: 'exact', head: true })
+        .eq('driver_id', userId)
+        .eq('status', 'delivered')
+        .gte('created_at', today);
+
+      setEntregador({
+        id: userId,
+        user_id: userId,
+        nome: userData.name || '',
+        email: userData.email || '',
+        telefone: userData.phone || '',
+        veiculo: driverData?.vehicle_type || 'Moto',
+        foto: '',
+        status: driverData?.is_online ? 'online' : 'offline',
+        ganhos_dia: ganhosDia,
+        entregas_hoje: entregasHoje || 0,
+        driver_id: driverData?.id,
+        role: userData.role,
+        accountStatus: userData.status,
+      });
+    } catch (e) {
+      console.error('Erro ao buscar dados do entregador:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const login = async (email: string, senha: string): Promise<{ success: boolean; error?: string }> => {
+    setIsLoading(true);
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: senha });
+
+    if (error) {
+      setIsLoading(false);
+      if (error.message.includes('Invalid login credentials')) {
+        return { success: false, error: 'Email ou senha incorretos.' };
+      }
+      return { success: false, error: error.message };
+    }
+
+    if (!data.session) {
+      setIsLoading(false);
+      return { success: false, error: 'Erro ao iniciar sessao.' };
+    }
+
+    // Verify this user is a driver
+    const { data: userData } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', data.session.user.id)
+      .single();
+
+    if (userData && userData.role !== 'driver') {
+      await supabase.auth.signOut();
+      setIsLoading(false);
+      return { success: false, error: 'Acesso restrito a entregadores.' };
+    }
+
+    // Register push token after successful login
+    registerForPushNotifications(data.session.user.id).catch(console.error);
+
+    return { success: true };
+  };
+
+  const logout = async () => {
+    // Remove push token on logout
+    if (entregador?.user_id) {
+      await removePushToken(entregador.user_id);
+    }
+    await supabase.auth.signOut();
+    setEntregador(null);
+    setSession(null);
+  };
+
+  const updateEntregador = async (data: Partial<Entregador>) => {
+    if (!entregador) return;
+
+    // Update local state immediately
+    setEntregador({ ...entregador, ...data });
+
+    // Sync status (online/offline) to drivers table
+    if (data.status !== undefined && entregador.driver_id) {
+      const isOnlineNow = data.status === 'online';
+      await supabase
+        .from('drivers')
+        .update({ is_online: isOnlineNow, last_update: new Date().toISOString() })
+        .eq('id', entregador.driver_id);
+
+      // Start or stop location tracking
+      if (isOnlineNow) {
+        startLocationTracking(entregador.driver_id);
+      } else {
+        stopLocationTracking();
+      }
+    }
+
+    // Sync profile fields to users table
+    const userUpdates: any = {};
+    if (data.nome) userUpdates.name = data.nome;
+    if (data.telefone) userUpdates.phone = data.telefone;
+
+    if (Object.keys(userUpdates).length > 0) {
+      await supabase
+        .from('users')
+        .update(userUpdates)
+        .eq('id', entregador.user_id);
+    }
+
+    // Sync vehicle type to drivers table
+    if (data.veiculo && entregador.driver_id) {
+      await supabase
+        .from('drivers')
+        .update({ vehicle_type: data.veiculo })
+        .eq('id', entregador.driver_id);
+    }
+  };
+
+  // Location tracking
+  const locationSubscriptionRef = React.useRef<Location.LocationSubscription | null>(null);
+
+  const startLocationTracking = async (driverId: string) => {
+    stopLocationTracking();
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') return;
+
+    locationSubscriptionRef.current = await Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.High, distanceInterval: 50, timeInterval: 30000 },
+      async (location) => {
+        await supabase
+          .from('drivers')
+          .update({
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            last_update: new Date().toISOString(),
+          })
+          .eq('id', driverId);
+      }
+    );
+  };
+
+  const stopLocationTracking = () => {
+    if (locationSubscriptionRef.current) {
+      locationSubscriptionRef.current.remove();
+      locationSubscriptionRef.current = null;
+    }
+  };
+
+  // Stop tracking on unmount
+  useEffect(() => {
+    return () => stopLocationTracking();
+  }, []);
+
+  const isAuthenticated = !!session && !!entregador;
+
+  return (
+    <AuthContext.Provider value={{ entregador, session, isAuthenticated, isLoading, login, logout, updateEntregador }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
