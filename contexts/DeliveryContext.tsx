@@ -134,32 +134,40 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     if (!entregador?.user_id) return;
     setIsLoadingOrders(true);
     try {
-      // 1. Try SECURITY DEFINER RPC — bypasses RLS and any status mismatch
+      // 1. SECURITY DEFINER RPC — bypasses RLS, no status filter at all
       let ordersData: any[] | null = null;
       const { data: rpcOrders, error: rpcErr } = await supabase.rpc('get_available_orders');
       if (!rpcErr && Array.isArray(rpcOrders)) {
         ordersData = rpcOrders;
-        console.log('[Delivery] RPC get_available_orders:', rpcOrders.length,
-          rpcOrders.map((o: any) => `id=${o.id} status=${o.status}`));
+        console.log('[Delivery] RPC pedidos disponiveis:', rpcOrders.length,
+          rpcOrders.map((o: any) => `id=${o.id?.slice(0,8)} status=${o.status} driver=${o.driver_id}`));
       } else {
-        // 2. Fallback: direct query with broad status filter
         if (rpcErr) console.warn('[Delivery] RPC get_available_orders falhou:', rpcErr.message);
+        // 2. Fallback: direct query — driver_id IS NULL, any status except final
         const { data: direct, error: directErr } = await supabase
           .from('orders')
           .select('*, restaurants(name, address, latitude, longitude)')
-          .in('status', ['pending', 'new', 'created', 'waiting', 'open', 'accepted'])
           .is('driver_id', null)
+          .not('status', 'in', '("delivered","cancelled")')
           .order('created_at', { ascending: true });
         if (directErr) {
-          console.error('[Delivery] Erro ao buscar pedidos:', directErr.message, '| code:', directErr.code);
+          console.error('[Delivery] Erro ao buscar pedidos:', directErr.message, directErr.code);
+          // 3. Last resort: fetch ALL orders with null driver_id regardless of status
+          const { data: any_orders } = await supabase
+            .from('orders')
+            .select('*, restaurants(name, address, latitude, longitude)')
+            .is('driver_id', null)
+            .order('created_at', { ascending: true });
+          ordersData = any_orders || [];
+          console.log('[Delivery] Fallback total (sem filtro status):', ordersData.length);
         } else {
-          ordersData = direct;
+          ordersData = direct || [];
           console.log('[Delivery] Direct query pedidos:', direct?.length ?? 0,
-            direct?.map((o: any) => `id=${o.id} status=${o.status}`));
+            direct?.map((o: any) => `id=${o.id?.slice(0,8)} status=${o.status}`));
         }
       }
 
-      if (ordersData) {
+      if (ordersData !== null) {
         setPedidos(ordersData.map((o: any, idx: number) => mapOrder(o, idx)));
       }
 
@@ -362,15 +370,21 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     const directOk = !directErr && Array.isArray(directData) && directData.length > 0;
 
     if (!directOk) {
-      console.warn('[Delivery] UPDATE avançar falhou, tentando RPC advance_order_status:', directErr?.message);
+      console.warn('[Delivery] UPDATE avançar falhou:', directErr?.message, '— tentando RPC...');
       const { data: rpcResult, error: rpcErr } = await supabase.rpc('advance_order_status', {
         p_order_id: pedidoAtivo.id,
         p_new_status: next.db,
       });
-      if (rpcErr || rpcResult?.success !== true) {
-        console.error('[Delivery] Falha ao avançar status:', rpcErr?.message || rpcResult?.error);
+      // Accept both {success: true} and truthy result
+      const rpcOk = !rpcErr && (rpcResult?.success === true || rpcResult === true || rpcResult === null);
+      if (!rpcOk) {
+        console.error('[Delivery] Falha ao avançar status:', rpcErr?.message || JSON.stringify(rpcResult));
         setDeliveryStatus(deliveryStatus); // revert UI
+      } else {
+        console.log('[Delivery] Status avançado via RPC para:', next.db);
       }
+    } else {
+      console.log('[Delivery] Status avançado via UPDATE para:', next.db);
     }
   };
 
