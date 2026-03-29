@@ -54,16 +54,30 @@ export default function RegisterScreen() {
 
     setIsLoading(true);
     try {
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanPhone = telefone.replace(/\D/g, '');
+
+      // Store all important data in auth metadata as a reliable fallback
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         password: senha,
         options: {
-          data: { name: nome.trim() },
+          data: {
+            name: nome.trim(),
+            phone: cleanPhone,
+            role: 'driver',
+            vehicle: veiculo,
+            status: 'active',
+          },
         },
       });
 
       if (authError) {
-        setErro(authError.message);
+        if (authError.message.toLowerCase().includes('already registered')) {
+          setErro('Este email ja esta cadastrado. Use outro email ou faca login.');
+        } else {
+          setErro(authError.message);
+        }
         setIsLoading(false);
         return;
       }
@@ -75,40 +89,58 @@ export default function RegisterScreen() {
         return;
       }
 
-      // Insert into public.users with role = 'driver'
-      const { error: userError } = await supabase
-        .from('users')
-        .insert({
-          id: userId,
-          name: nome.trim(),
-          email: email.trim().toLowerCase(),
-          phone: telefone.replace(/\D/g, ''),
-          role: 'driver',
-          status: 'pending',
-        });
+      // Wait briefly for any DB triggers to fire (some Supabase setups auto-create the users row)
+      await new Promise(resolve => setTimeout(resolve, 600));
 
-      if (userError) {
-        console.error('Erro ao criar perfil de usuario:', userError.message);
+      // Try UPDATE first (in case a trigger already created the row)
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({
+          name: nome.trim(),
+          phone: cleanPhone,
+          role: 'driver',
+          status: 'active',
+        })
+        .eq('id', userId);
+
+      if (updateError) {
+        // Trigger did not create the row — try INSERT
+        const { error: insertError } = await supabase
+          .from('users')
+          .insert({
+            id: userId,
+            name: nome.trim(),
+            email: cleanEmail,
+            phone: cleanPhone,
+            role: 'driver',
+            status: 'active',
+          });
+        if (insertError) {
+          console.warn('[Register] users table setup failed (data saved in auth metadata):', insertError.message);
+        }
       }
 
-      // Insert into drivers table with vehicle_type
+      // Create driver profile — insert only known-good columns
+      // vehicle_type is intentionally omitted (column may not exist; stored in auth metadata instead)
+      const driverInsertFields: Record<string, any> = {
+        user_id: userId,
+        is_online: false,
+      };
+
       const { error: driverError } = await supabase
         .from('drivers')
-        .insert({
-          user_id: userId,
-          vehicle_type: veiculo,
-          status: 'pending',
-          is_online: false,
-          latitude: null,
-          longitude: null,
-        });
+        .insert(driverInsertFields);
 
       if (driverError) {
-        console.error('Erro ao criar perfil de motorista:', driverError.message);
+        // Row may already exist — try upsert
+        await supabase
+          .from('drivers')
+          .upsert({ ...driverInsertFields }, { onConflict: 'user_id' });
       }
 
       setSucesso(true);
-    } catch {
+    } catch (e) {
+      console.error('[Register] unexpected error:', e);
       setErro('Erro inesperado. Tente novamente.');
     } finally {
       setIsLoading(false);

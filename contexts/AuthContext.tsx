@@ -77,34 +77,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchEntregadorData = async (userId: string) => {
     try {
       // Fetch user data from public.users table
-      const { data: userData, error: userError } = await supabase
+      const { data: userData } = await supabase
         .from('users')
         .select('*')
         .eq('id', userId)
         .single();
 
-      if (userError || !userData) {
+      // Fall back to auth metadata if public.users row is not yet available
+      // (can happen briefly after registration or if RLS restricts access)
+      let resolvedUser = userData;
+      if (!resolvedUser) {
+        const { data: authResp } = await supabase.auth.getUser();
+        const meta = authResp?.user?.user_metadata;
+        if (meta) {
+          resolvedUser = {
+            name: meta.name || '',
+            email: authResp?.user?.email || '',
+            phone: meta.phone || '',
+            role: meta.role || 'driver',
+            status: meta.status || 'active',
+          };
+        }
+      }
+
+      // If we still have no user info at all, bail out
+      if (!resolvedUser) {
         setIsLoading(false);
         return;
       }
 
-      // Fetch driver data
+      // Only allow drivers to use this app
+      if (resolvedUser.role && resolvedUser.role !== 'driver') {
+        await supabase.auth.signOut();
+        setIsLoading(false);
+        return;
+      }
+
+      // Fetch driver profile
       const { data: driverData } = await supabase
         .from('drivers')
         .select('*')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
+
+      // Resolve vehicle — prefer DB row, fall back to auth metadata
+      const { data: authResp2 } = await supabase.auth.getUser();
+      const vehicleFromMeta = authResp2?.user?.user_metadata?.vehicle;
+      const veiculo = driverData?.vehicle_type || vehicleFromMeta || 'Moto';
 
       // Compute today's earnings from completed orders
       const today = new Date().toISOString().split('T')[0];
       const { data: ordersToday } = await supabase
         .from('orders')
-        .select('total')
+        .select('delivery_fee, total')
         .eq('driver_id', userId)
         .eq('status', 'delivered')
         .gte('created_at', today);
 
-      const ganhosDia = (ordersToday || []).reduce((sum: number, o: any) => sum + (Number(o.delivery_fee) || Number(o.total) * 0.15 || 0), 0);
+      const ganhosDia = (ordersToday || []).reduce(
+        (sum: number, o: any) => sum + (Number(o.delivery_fee) || Number(o.total) * 0.15 || 0),
+        0
+      );
 
       // Count today's deliveries
       const { count: entregasHoje } = await supabase
@@ -117,17 +150,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setEntregador({
         id: userId,
         user_id: userId,
-        nome: userData.name || '',
-        email: userData.email || '',
-        telefone: userData.phone || '',
-        veiculo: driverData?.vehicle_type || 'Moto',
+        nome: resolvedUser.name || '',
+        email: resolvedUser.email || '',
+        telefone: resolvedUser.phone || '',
+        veiculo,
         foto: '',
         status: driverData?.is_online ? 'online' : 'offline',
         ganhos_dia: ganhosDia,
         entregas_hoje: entregasHoje || 0,
         driver_id: driverData?.id,
-        role: userData.role,
-        accountStatus: userData.status,
+        role: resolvedUser.role,
+        accountStatus: resolvedUser.status,
       });
     } catch (e) {
       console.error('Erro ao buscar dados do entregador:', e);
@@ -154,13 +187,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     // Verify this user is a driver
+    // Check DB first, fall back to auth metadata
     const { data: userData } = await supabase
       .from('users')
       .select('role')
       .eq('id', data.session.user.id)
-      .single();
+      .maybeSingle();
 
-    if (userData && userData.role !== 'driver') {
+    const role = userData?.role || data.user?.user_metadata?.role;
+    if (role && role !== 'driver') {
       await supabase.auth.signOut();
       setIsLoading(false);
       return { success: false, error: 'Acesso restrito a entregadores.' };
