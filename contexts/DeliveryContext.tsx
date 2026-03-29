@@ -91,9 +91,11 @@ function mapOrder(o: any, idx = 0): Pedido {
     id: o.id,
     restaurante_nome: o.restaurants?.name || 'Restaurante',
     restaurante_id: o.restaurant_id,
-    cliente_nome: o.client_name || o.customer_name || o.nome_cliente || 'Cliente',
+    cliente_nome: o.client_name || o.customer_name || o.nome_cliente
+      || (o.client_id ? `Cliente #${String(o.client_id).slice(0, 6)}` : 'Cliente'),
     endereco_coleta: o.restaurants?.address || 'Endereco do restaurante',
-    endereco_entrega: o.delivery_address || o.address_delivery || o.endereco_entrega || 'Endereco de entrega',
+    endereco_entrega: o.delivery_address || o.address_delivery || o.endereco_entrega
+      || o.delivery_location || o.drop_off_address || 'Endereco de entrega',
     valor_entrega: Number(o.delivery_fee) || Number(o.total) * 0.15 || 8.50,
     distancia,
     tempo_estimado: `${15 + idx * 5} min`,
