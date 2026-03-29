@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, ReactNode } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/services/supabase';
@@ -253,19 +253,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Update local state immediately
     setEntregador({ ...entregador, ...data });
 
-    // Sync status (online/offline) to drivers table
-    if (data.status !== undefined && entregador.driver_id) {
+    // Sync online/offline status to drivers table (by user_id — always available)
+    if (data.status !== undefined) {
       const isOnlineNow = data.status === 'online';
-      await supabase
+      const { error: onlineErr } = await supabase
         .from('drivers')
         .update({ is_online: isOnlineNow, last_update: new Date().toISOString() })
-        .eq('id', entregador.driver_id);
+        .eq('user_id', entregador.user_id);
 
-      // Start or stop location tracking
-      if (isOnlineNow) {
-        startLocationTracking(entregador.driver_id);
-      } else {
-        stopLocationTracking();
+      if (onlineErr) {
+        console.warn('[Auth] failed to update is_online:', onlineErr.message);
+      }
+
+      // Location tracking — only on native (not web)
+      if (Platform.OS !== 'web') {
+        if (isOnlineNow) {
+          startLocationTracking(entregador.user_id);
+        } else {
+          stopLocationTracking();
+        }
       }
     }
 
@@ -280,20 +286,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .update(userUpdates)
         .eq('id', entregador.user_id);
     }
-
-    // Sync vehicle type to drivers table
-    if (data.veiculo && entregador.driver_id) {
-      await supabase
-        .from('drivers')
-        .update({ vehicle_type: data.veiculo })
-        .eq('id', entregador.driver_id);
-    }
   };
 
   // Location tracking
   const locationSubscriptionRef = React.useRef<Location.LocationSubscription | null>(null);
 
-  const startLocationTracking = async (driverId: string) => {
+  const startLocationTracking = async (userId: string) => {
+    if (Platform.OS === 'web') return;
     stopLocationTracking();
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') return;
@@ -308,12 +307,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             longitude: location.coords.longitude,
             last_update: new Date().toISOString(),
           })
-          .eq('id', driverId);
+          .eq('user_id', userId);
       }
     );
   };
 
   const stopLocationTracking = () => {
+    if (Platform.OS === 'web') return;
     if (locationSubscriptionRef.current) {
       locationSubscriptionRef.current.remove();
       locationSubscriptionRef.current = null;
