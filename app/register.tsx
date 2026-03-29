@@ -120,11 +120,12 @@ export default function RegisterScreen() {
         }
       }
 
-      // Create driver profile — insert only known-good columns
-      // vehicle_type is intentionally omitted (column may not exist; stored in auth metadata instead)
+      // Create driver profile — status: 'pending' awaits admin approval
+      // vehicle_type column does not exist in the DB schema; stored in auth metadata instead
       const driverInsertFields: Record<string, any> = {
         user_id: userId,
         is_online: false,
+        status: 'pending',
       };
 
       const { error: driverError } = await supabase

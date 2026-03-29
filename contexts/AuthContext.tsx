@@ -148,6 +148,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('status', 'delivered')
         .gte('created_at', today);
 
+      // accountStatus comes from drivers.status first (admin manages approval there),
+      // falling back to users.status, then auth metadata status
+      const accountStatus = driverData?.status || resolvedUser.status || 'pending';
+
       setEntregador({
         id: userId,
         user_id: userId,
@@ -161,7 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         entregas_hoje: entregasHoje || 0,
         driver_id: driverData?.id,
         role: resolvedUser.role,
-        accountStatus: resolvedUser.status,
+        accountStatus,
       });
     } catch (e) {
       console.error('Erro ao buscar dados do entregador:', e);
