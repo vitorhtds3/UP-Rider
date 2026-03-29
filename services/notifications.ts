@@ -98,6 +98,7 @@ export async function showLocalNotification(
   body: string,
   channelId = 'pedidos'
 ): Promise<void> {
+  if (Platform.OS === 'web') return;
   try {
     await Notifications.scheduleNotificationAsync({
       content: {

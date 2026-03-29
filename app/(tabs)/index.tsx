@@ -6,7 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Switch,
-  Platform,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -18,7 +18,7 @@ import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme
 export default function DashboardScreen() {
   const router = useRouter();
   const { entregador, updateEntregador } = useAuth();
-  const { pedidosDisponiveis, pedidoAtivo, ganhosDia } = useDelivery();
+  const { pedidoAtual, totalDisponiveis, pedidoAtivo, ganhosDia } = useDelivery();
 
   const isOnline = entregador?.status === 'online';
 
@@ -27,6 +27,7 @@ export default function DashboardScreen() {
   };
 
   const primeiroNome = entregador?.nome?.split(' ')[0] || 'Entregador';
+  const hasPendingOrder = isOnline && pedidoAtual !== null && !pedidoAtivo;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -83,9 +84,34 @@ export default function DashboardScreen() {
             <View style={styles.activePulse} />
             <View style={{ flex: 1 }}>
               <Text style={styles.activeBannerTitle}>Entrega em andamento</Text>
-              <Text style={styles.activeBannerSub}>{pedidoAtivo.restaurante_nome} - {pedidoAtivo.cliente_nome}</Text>
+              <Text style={styles.activeBannerSub}>{pedidoAtivo.restaurante_nome} — {pedidoAtivo.cliente_nome}</Text>
             </View>
             <MaterialIcons name="chevron-right" size={22} color="#fff" />
+          </TouchableOpacity>
+        )}
+
+        {/* Novo pedido disponivel — banner de destaque */}
+        {hasPendingOrder && (
+          <TouchableOpacity
+            style={styles.newOrderBanner}
+            onPress={() => router.push('/(tabs)/orders')}
+            activeOpacity={0.85}
+          >
+            <View style={styles.newOrderIconBox}>
+              <MaterialIcons name="delivery-dining" size={26} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.newOrderTitle}>Novo pedido disponivel!</Text>
+              <Text style={styles.newOrderSub}>
+                {pedidoAtual.restaurante_nome} — R$ {pedidoAtual.valor_entrega.toFixed(2).replace('.', ',')}
+              </Text>
+              {totalDisponiveis > 1 && (
+                <Text style={styles.newOrderQueue}>+{totalDisponiveis - 1} mais na fila</Text>
+              )}
+            </View>
+            <View style={styles.newOrderArrow}>
+              <MaterialIcons name="chevron-right" size={22} color={Colors.primary} />
+            </View>
           </TouchableOpacity>
         )}
 
@@ -103,7 +129,7 @@ export default function DashboardScreen() {
           </View>
           <View style={styles.statCard}>
             <MaterialIcons name="receipt-long" size={20} color={Colors.warning} />
-            <Text style={styles.statValue}>{pedidosDisponiveis.length}</Text>
+            <Text style={styles.statValue}>{totalDisponiveis}</Text>
             <Text style={styles.statLabel}>Disponiveis</Text>
           </View>
         </View>
@@ -112,10 +138,11 @@ export default function DashboardScreen() {
         <Text style={styles.sectionTitle}>Acoes rapidas</Text>
         <View style={styles.actionsRow}>
           <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/(tabs)/orders')} activeOpacity={0.8}>
-            <View style={[styles.actionIcon, { backgroundColor: Colors.primaryUltraLight }]}>
+            <View style={[styles.actionIcon, { backgroundColor: hasPendingOrder ? Colors.primaryUltraLight : Colors.primaryUltraLight }]}>
               <MaterialIcons name="receipt-long" size={26} color={Colors.primary} />
             </View>
             <Text style={styles.actionText}>Ver Pedidos</Text>
+            {hasPendingOrder && <View style={styles.badgeDot} />}
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/(tabs)/earnings')} activeOpacity={0.8}>
             <View style={[styles.actionIcon, { backgroundColor: Colors.successLight }]}>
@@ -163,6 +190,12 @@ const styles = StyleSheet.create({
   activePulse: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff' },
   activeBannerTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: '#fff' },
   activeBannerSub: { fontSize: FontSize.xs, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  newOrderBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.md, marginBottom: Spacing.md, gap: 12, borderWidth: 2, borderColor: Colors.primary, shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 6 },
+  newOrderIconBox: { width: 48, height: 48, borderRadius: Radius.md, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
+  newOrderTitle: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  newOrderSub: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 2 },
+  newOrderQueue: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semibold, marginTop: 3 },
+  newOrderArrow: { width: 36, height: 36, borderRadius: Radius.full, backgroundColor: Colors.primaryUltraLight, alignItems: 'center', justifyContent: 'center' },
   statsRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg },
   statCard: { flex: 1, backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.md, alignItems: 'center', shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 6, elevation: 2 },
   statValue: { fontSize: FontSize.lg, fontWeight: FontWeight.bold, color: Colors.textPrimary, marginTop: 6 },
@@ -172,6 +205,7 @@ const styles = StyleSheet.create({
   actionCard: { flex: 1, backgroundColor: Colors.surface, borderRadius: Radius.lg, padding: Spacing.md, alignItems: 'center', shadowColor: Colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 6, elevation: 2 },
   actionIcon: { width: 50, height: 50, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.sm },
   actionText: { fontSize: FontSize.xs, fontWeight: FontWeight.semibold, color: Colors.textSecondary, textAlign: 'center' },
+  badgeDot: { position: 'absolute', top: 10, right: 10, width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.error },
   tipCard: { flexDirection: 'row', backgroundColor: Colors.warningLight, borderRadius: Radius.md, padding: Spacing.md, gap: 10, alignItems: 'flex-start' },
   tipText: { flex: 1, fontSize: FontSize.sm, color: '#92400E', lineHeight: 20 },
 });
