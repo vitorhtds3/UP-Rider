@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -39,7 +39,8 @@ function useOrderTimers(
             if (current === undefined || current <= 1) {
               clearInterval(timerRefs.current[order.id]);
               delete timerRefs.current[order.id];
-              onExpire(order.id);
+              // Defer onExpire to avoid calling setState on another component during render
+              setTimeout(() => onExpire(order.id), 0);
               const next = { ...prev };
               delete next[order.id];
               return next;
@@ -86,12 +87,10 @@ export default function OrdersScreen() {
 
   const isOnline = entregador?.status === 'online';
 
-  const handleTimerExpire = (orderId: string) => {
+  const handleTimerExpire = useCallback((orderId: string) => {
     recusarPedido(orderId);
-    if (selectedPedido?.id === orderId) {
-      setSelectedPedido(null);
-    }
-  };
+    setSelectedPedido(prev => (prev?.id === orderId ? null : prev));
+  }, [recusarPedido]);
 
   const timers = useOrderTimers(isOnline ? pedidosDisponiveis : [], handleTimerExpire);
 
