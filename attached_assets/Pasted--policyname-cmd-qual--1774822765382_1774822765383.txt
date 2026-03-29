@@ -1,0 +1,29 @@
+| policyname                    | cmd    | qual                                                                                                                                           |
+| ----------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| admin_delete_orders           | DELETE | (get_my_role() = 'admin'::text)                                                                                                                |
+| Users can insert own orders   | INSERT | null                                                                                                                                           |
+| admin_insert_orders           | INSERT | null                                                                                                                                           |
+| Public read for orders        | SELECT | true                                                                                                                                           |
+| Users can read own orders     | SELECT | (auth.uid() = client_id)                                                                                                                       |
+| admin_all                     | SELECT | (get_my_role() = 'admin'::text)                                                                                                                |
+| admin_select_orders           | SELECT | is_admin()                                                                                                                                     |
+| client_orders                 | SELECT | (client_id = auth.uid())                                                                                                                       |
+| driver_orders                 | SELECT | (driver_id = auth.uid())                                                                                                                       |
+| drivers_read_orders           | SELECT | ((driver_id IS NULL) OR (driver_id = ( SELECT drivers.id
+   FROM drivers
+  WHERE (drivers.user_id = auth.uid()))) OR (driver_id = auth.uid())) |
+| orders_driver_select          | SELECT | (((status = 'pending'::text) AND (driver_id IS NULL)) OR (driver_id = auth.uid()))                                                             |
+| orders_sel                    | SELECT | (restaurant_id IN ( SELECT restaurants.id
+   FROM restaurants
+  WHERE (restaurants.user_id = auth.uid())))                                     |
+| restaurant_orders             | SELECT | (restaurant_id IN ( SELECT restaurants.id
+   FROM restaurants
+  WHERE (restaurants.user_id = auth.uid())))                                     |
+| admin_update_orders           | UPDATE | is_admin()                                                                                                                                     |
+| drivers_can_update_own_orders | UPDATE | (driver_id = auth.uid())                                                                                                                       |
+| drivers_update_orders         | UPDATE | ((driver_id IS NULL) OR (driver_id = ( SELECT drivers.id
+   FROM drivers
+  WHERE (drivers.user_id = auth.uid()))) OR (driver_id = auth.uid())) |
+| orders_upd                    | UPDATE | (restaurant_id IN ( SELECT restaurants.id
+   FROM restaurants
+  WHERE (restaurants.user_id = auth.uid())))                                     |
