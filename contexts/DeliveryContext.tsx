@@ -275,23 +275,32 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     const pedido = pedidos.find(p => p.id === pedidoId);
     if (!pedido) return false;
 
-    const { error, count } = await supabase
+    // 1. Try direct UPDATE (works if RLS allows it)
+    const { data: directData, error: directErr } = await supabase
       .from('orders')
-      .update({
-        driver_id: entregador.user_id,
-        status: 'preparing',
-      })
+      .update({ driver_id: entregador.user_id, status: 'preparing' })
       .eq('id', pedidoId)
-      .is('driver_id', null) // Only accept if still unassigned (race condition guard)
+      .is('driver_id', null)
       .select('id');
 
-    if (error) {
-      console.error('[Delivery] Erro ao aceitar pedido:', error.message);
-      fetchOrders();
-      return false;
+    const directOk = !directErr && Array.isArray(directData) && directData.length > 0;
+
+    if (!directOk) {
+      console.warn('[Delivery] UPDATE aceitar falhou, tentando RPC accept_order:', directErr?.message);
+
+      // 2. Fallback: SECURITY DEFINER RPC bypasses RLS
+      const { data: rpcResult, error: rpcErr } = await supabase.rpc('accept_order', {
+        p_order_id: pedidoId,
+        p_driver_id: entregador.user_id,
+      });
+
+      if (rpcErr || rpcResult?.success !== true) {
+        console.error('[Delivery] Falha ao aceitar pedido:', rpcErr?.message || rpcResult?.error);
+        fetchOrders();
+        return false;
+      }
     }
 
-    // Remove from local queue — realtime will propagate to all other drivers
     setPedidos(prev => prev.filter(p => p.id !== pedidoId));
     setPedidoAtivo({ ...pedido, status: 'em_andamento', entregador_id: entregador.user_id });
     setDeliveryStatus('indo_buscar');
@@ -317,8 +326,31 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     const next = nextStatus[deliveryStatus];
     if (!next) return;
 
+    // Optimistic UI update
     setDeliveryStatus(next.delivery);
-    await supabase.from('orders').update({ status: next.db }).eq('id', pedidoAtivo.id);
+
+    // 1. Try direct UPDATE
+    const { data: directData, error: directErr } = await supabase
+      .from('orders')
+      .update({ status: next.db })
+      .eq('id', pedidoAtivo.id)
+      .eq('driver_id', entregador.user_id)
+      .select('id');
+
+    const directOk = !directErr && Array.isArray(directData) && directData.length > 0;
+
+    if (!directOk) {
+      console.warn('[Delivery] UPDATE avançar falhou, tentando RPC advance_order_status:', directErr?.message);
+      const { data: rpcResult, error: rpcErr } = await supabase.rpc('advance_order_status', {
+        p_order_id: pedidoAtivo.id,
+        p_driver_id: entregador.user_id,
+        p_new_status: next.db,
+      });
+      if (rpcErr || rpcResult?.success !== true) {
+        console.error('[Delivery] Falha ao avançar status:', rpcErr?.message || rpcResult?.error);
+        setDeliveryStatus(deliveryStatus); // revert UI
+      }
+    }
   };
 
   const finalizarEntrega = async (): Promise<boolean> => {
@@ -346,10 +378,9 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     if (!directOk) {
       console.warn('[Delivery] UPDATE direto falhou, tentando RPC finalize_delivery:', updateErr?.message);
 
-      // 2. Fallback: SECURITY DEFINER RPC (bypasses RLS)
+      // 2. Fallback: SECURITY DEFINER RPC (bypasses RLS, no driver_id filter)
       const { data: rpcResult, error: rpcErr } = await supabase.rpc('finalize_delivery', {
         p_order_id: orderId,
-        p_driver_id: driverId,
         p_earnings: earnings,
       });
 
