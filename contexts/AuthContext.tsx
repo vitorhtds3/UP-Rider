@@ -220,12 +220,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      if (Platform.OS !== 'web') {
-        if (isOnlineNow) {
-          startLocationTracking(entregador.user_id);
-        } else {
-          stopLocationTracking();
-        }
+      if (isOnlineNow) {
+        startLocationTracking(entregador.user_id);
+      } else {
+        stopLocationTracking();
       }
     }
 
@@ -239,13 +237,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const locationSubscriptionRef = React.useRef<Location.LocationSubscription | null>(null);
+  const webWatchIdRef = React.useRef<number | null>(null);
+
+  const stopLocationTracking = () => {
+    if (locationSubscriptionRef.current) {
+      locationSubscriptionRef.current.remove();
+      locationSubscriptionRef.current = null;
+    }
+    if (typeof navigator !== 'undefined' && navigator.geolocation && webWatchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(webWatchIdRef.current);
+      webWatchIdRef.current = null;
+    }
+  };
 
   const startLocationTracking = async (userId: string) => {
-    if (Platform.OS === 'web') return;
     stopLocationTracking();
+
+    if (Platform.OS === 'web') {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+      webWatchIdRef.current = navigator.geolocation.watchPosition(
+        async (pos) => {
+          await supabase
+            .from('drivers')
+            .update({
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              last_update: new Date().toISOString(),
+            })
+            .eq('user_id', userId);
+        },
+        (err) => console.warn('[Location] Web geolocation error:', err.message),
+        { enableHighAccuracy: false, maximumAge: 30000, timeout: 15000 }
+      );
+      return;
+    }
+
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') return;
-
     locationSubscriptionRef.current = await Location.watchPositionAsync(
       { accuracy: Location.Accuracy.High, distanceInterval: 50, timeInterval: 30000 },
       async (location) => {
@@ -259,14 +287,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .eq('user_id', userId);
       }
     );
-  };
-
-  const stopLocationTracking = () => {
-    if (Platform.OS === 'web') return;
-    if (locationSubscriptionRef.current) {
-      locationSubscriptionRef.current.remove();
-      locationSubscriptionRef.current = null;
-    }
   };
 
   useEffect(() => {

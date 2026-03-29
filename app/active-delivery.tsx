@@ -96,24 +96,37 @@ export default function ActiveDeliveryScreen() {
     ? pedidoAtivo?.endereco_coleta ?? ''
     : pedidoAtivo?.endereco_entrega ?? '';
 
-  const updateLocation = useCallback(async () => {
-    try {
-      if (Platform.OS === 'web') return;
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-      setDriverCoords(coords);
-      const dist = haversineDistance(coords.latitude, coords.longitude, targetCoords.latitude, targetCoords.longitude);
-      setDistanceToTarget(formatDistance(dist));
-    } catch (_) {}
+  const updateLocation = useCallback(() => {
+    if (Platform.OS === 'web') {
+      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+            setDriverCoords(coords);
+            const dist = haversineDistance(coords.latitude, coords.longitude, targetCoords.latitude, targetCoords.longitude);
+            setDistanceToTarget(formatDistance(dist));
+          },
+          () => {} // silent — user may deny or browser may block
+        );
+      }
+      return;
+    }
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        setDriverCoords(coords);
+        const dist = haversineDistance(coords.latitude, coords.longitude, targetCoords.latitude, targetCoords.longitude);
+        setDistanceToTarget(formatDistance(dist));
+      } catch (_) {}
+    })();
   }, [targetCoords.latitude, targetCoords.longitude]);
 
   useEffect(() => {
     updateLocation();
-    if (Platform.OS !== 'web') {
-      locationTimerRef.current = setInterval(updateLocation, LOCATION_UPDATE_INTERVAL);
-    }
+    locationTimerRef.current = setInterval(updateLocation, LOCATION_UPDATE_INTERVAL);
     return () => { if (locationTimerRef.current) clearInterval(locationTimerRef.current); };
   }, [updateLocation]);
 

@@ -54,6 +54,14 @@ Configured as a static deployment:
 - **Build**: `npx expo export --platform web`
 - **Output**: `dist/` directory
 
+## Architecture Notes
+
+- **No `users` table** — all user info lives in Supabase `auth.user_metadata` (name, phone, role, vehicle, status). Never read/write a `users` table.
+- **Supabase tables used**: `drivers` (user_id, status, is_online, latitude, longitude, last_update), `orders` (id, restaurant_id, client_id, driver_id, status, total, delivery_fee, delivery_address, created_at, + optional coord columns), `push_tokens`, `restaurants`, `notifications`.
+- **No `Alert.alert`** — replaced with custom in-screen confirm sheets on every screen (blocked in iframes/web).
+- **Location tracking**: uses `expo-location` on native, `navigator.geolocation.watchPosition` on web. Tracks when driver is online; pauses when offline.
+- **Realtime**: `orders` and `notifications` tables use Supabase realtime subscriptions + polling fallback.
+
 ## Bug Fixes Applied (March 2026)
 
 1. **Splash screen auth check** — now checks Supabase session and routes to `/` (authenticated) or `/login` (unauthenticated) after exactly ~4 seconds of animation

@@ -60,6 +60,51 @@ const APP_STATUS_MAP: Record<string, string> = {
   delivered: 'entregue',
 };
 
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatDistancia(km: number): string {
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  return `${km.toFixed(1).replace('.', ',')} km`;
+}
+
+function mapOrder(o: any, idx = 0): Pedido {
+  const latColeta = o.restaurants?.latitude ? Number(o.restaurants.latitude) : undefined;
+  const lngColeta = o.restaurants?.longitude ? Number(o.restaurants.longitude) : undefined;
+  const latEntrega = Number(o.latitude_delivery ?? o.delivery_latitude ?? o.lat_entrega ?? 0) || undefined;
+  const lngEntrega = Number(o.longitude_delivery ?? o.delivery_longitude ?? o.lon_entrega ?? 0) || undefined;
+
+  let distancia = `${(1.5 + idx * 0.8).toFixed(1).replace('.', ',')} km`;
+  if (latColeta && lngColeta && latEntrega && lngEntrega) {
+    distancia = formatDistancia(haversineKm(latColeta, lngColeta, latEntrega, lngEntrega));
+  }
+
+  return {
+    id: o.id,
+    restaurante_nome: o.restaurants?.name || 'Restaurante',
+    restaurante_id: o.restaurant_id,
+    cliente_nome: o.client_name || o.customer_name || o.nome_cliente || 'Cliente',
+    endereco_coleta: o.restaurants?.address || 'Endereco do restaurante',
+    endereco_entrega: o.delivery_address || o.address_delivery || o.endereco_entrega || 'Endereco de entrega',
+    valor_entrega: Number(o.delivery_fee) || Number(o.total) * 0.15 || 8.50,
+    distancia,
+    tempo_estimado: `${15 + idx * 5} min`,
+    status: 'disponivel',
+    data: o.created_at,
+    latitude_coleta: latColeta,
+    longitude_coleta: lngColeta,
+    latitude_entrega: latEntrega,
+    longitude_entrega: lngEntrega,
+  };
+}
+
 // How long (ms) before a refused order cycles back into the queue
 const RECYCLE_DELAY_MS = 45_000;
 // How long (ms) before re-fetching when we have 0 orders (polling fallback)
@@ -87,24 +132,10 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     if (!entregador?.user_id) return;
     setIsLoadingOrders(true);
     try {
+      // Use * to capture any extra columns (delivery_address, client_name, coords, etc.)
       const { data: ordersData, error } = await supabase
         .from('orders')
-        .select(`
-          id,
-          client_id,
-          restaurant_id,
-          driver_id,
-          status,
-          total,
-          delivery_fee,
-          created_at,
-          restaurants (
-            name,
-            address,
-            latitude,
-            longitude
-          )
-        `)
+        .select('*, restaurants(name, address, latitude, longitude)')
         .eq('status', 'pending')
         .is('driver_id', null)
         .order('created_at', { ascending: true });
@@ -112,64 +143,24 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
       if (error) {
         console.error('[Delivery] Erro ao buscar pedidos:', error.message);
       } else {
-        const mapped: Pedido[] = (ordersData || []).map((o: any, idx: number) => ({
-          id: o.id,
-          restaurante_nome: o.restaurants?.name || 'Restaurante',
-          restaurante_id: o.restaurant_id,
-          cliente_nome: 'Cliente',
-          endereco_coleta: o.restaurants?.address || 'Endereco do restaurante',
-          endereco_entrega: 'Endereco de entrega',
-          valor_entrega: Number(o.delivery_fee) || Number(o.total) * 0.15 || 8.50,
-          distancia: `${(1.5 + idx * 0.8).toFixed(1).replace('.', ',')} km`,
-          tempo_estimado: `${15 + idx * 5} min`,
-          status: 'disponivel',
-          data: o.created_at,
-          latitude_coleta: o.restaurants?.latitude ? Number(o.restaurants.latitude) : undefined,
-          longitude_coleta: o.restaurants?.longitude ? Number(o.restaurants.longitude) : undefined,
-        }));
-        setPedidos(mapped);
+        setPedidos((ordersData || []).map((o: any, idx: number) => mapOrder(o, idx)));
       }
 
       // Fetch active order for this driver
       const { data: activeOrder } = await supabase
         .from('orders')
-        .select(`
-          id,
-          client_id,
-          restaurant_id,
-          driver_id,
-          status,
-          total,
-          delivery_fee,
-          created_at,
-          restaurants (
-            name,
-            address,
-            latitude,
-            longitude
-          )
-        `)
+        .select('*, restaurants(name, address, latitude, longitude)')
         .eq('driver_id', entregador.user_id)
         .in('status', ['preparing', 'ready', 'delivering'])
         .maybeSingle();
 
       if (activeOrder) {
         const appStatus = APP_STATUS_MAP[activeOrder.status] || 'em_andamento';
+        const mapped = mapOrder(activeOrder);
         setPedidoAtivo({
-          id: activeOrder.id,
-          restaurante_nome: (activeOrder as any).restaurants?.name || 'Restaurante',
-          restaurante_id: activeOrder.restaurant_id,
-          cliente_nome: 'Cliente',
-          endereco_coleta: (activeOrder as any).restaurants?.address || 'Endereco do restaurante',
-          endereco_entrega: 'Endereco de entrega',
-          valor_entrega: Number((activeOrder as any).delivery_fee) || Number((activeOrder as any).total) * 0.15 || 8.50,
-          distancia: '2,5 km',
-          tempo_estimado: '20 min',
+          ...mapped,
           status: appStatus as Pedido['status'],
           entregador_id: entregador.user_id,
-          data: activeOrder.created_at,
-          latitude_coleta: (activeOrder as any).restaurants?.latitude ? Number((activeOrder as any).restaurants.latitude) : undefined,
-          longitude_coleta: (activeOrder as any).restaurants?.longitude ? Number((activeOrder as any).restaurants.longitude) : undefined,
         });
         const statusMapping: Record<string, DeliveryStatus> = {
           preparing: 'indo_buscar',
@@ -285,7 +276,6 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
       .update({
         driver_id: entregador.user_id,
         status: 'preparing',
-        assigned_at: new Date().toISOString(),
       })
       .eq('id', pedidoId)
       .is('driver_id', null) // Only accept if still unassigned (race condition guard)
