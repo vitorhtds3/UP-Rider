@@ -89,45 +89,18 @@ export default function RegisterScreen() {
         return;
       }
 
-      // Wait briefly for any DB triggers to fire (some Supabase setups auto-create the users row)
-      await new Promise(resolve => setTimeout(resolve, 600));
-
-      // Try UPDATE first (in case a trigger already created the row)
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({
-          name: nome.trim(),
-          phone: cleanPhone,
-          role: 'driver',
-          status: 'pending',
-        })
-        .eq('id', userId);
-
-      if (updateError) {
-        // Trigger did not create the row — try INSERT
-        const { error: insertError } = await supabase
-          .from('users')
-          .insert({
-            id: userId,
-            name: nome.trim(),
-            email: cleanEmail,
-            phone: cleanPhone,
-            role: 'driver',
-            status: 'pending',
-          });
-        if (insertError) {
-          console.warn('[Register] users table setup failed (data saved in auth metadata):', insertError.message);
-        }
-      }
-
-      // Create driver profile via RPC function (bypasses RLS that blocks direct INSERT)
-      const { error: driverError } = await supabase.rpc('create_driver_profile', {
+      // Single RPC call creates both users + drivers rows with SECURITY DEFINER
+      // (bypasses RLS that blocks direct INSERT on both tables)
+      const { error: rpcError } = await supabase.rpc('register_driver', {
         p_user_id: userId,
-        p_status: 'pending',
+        p_name:    nome.trim(),
+        p_email:   cleanEmail,
+        p_phone:   cleanPhone,
       });
 
-      if (driverError) {
-        console.warn('[Register] drivers profile creation failed:', driverError.message);
+      if (rpcError) {
+        console.warn('[Register] register_driver RPC failed:', rpcError.message);
+        // Data is still saved in auth metadata as fallback
       }
 
       setSucesso(true);
