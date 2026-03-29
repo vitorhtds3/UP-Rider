@@ -59,7 +59,12 @@ const styles = StyleSheet.create({
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
+
+  // Wait for session to restore from storage before redirecting
+  // Without this check, a page refresh redirects to /login before
+  // Supabase has a chance to load the persisted session.
+  if (isLoading) return null;
 
   if (!isAuthenticated) {
     return <Redirect href="/login" />;

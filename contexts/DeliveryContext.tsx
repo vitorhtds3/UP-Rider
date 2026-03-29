@@ -200,14 +200,21 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
       .order('created_at', { ascending: false });
 
     if (data) {
-      const hist: HistoricoEntrega[] = data.map((o: any) => ({
-        id: o.id,
-        restaurante_nome: o.restaurants?.name || 'Restaurante',
-        data: o.created_at.split('T')[0],
-        valor: Number(o.delivery_fee) || Number(o.total) * 0.15 || 8.50,
-        distancia: '2,5 km',
-        status: 'entregue',
-      }));
+      const seen = new Set<string>();
+      const hist: HistoricoEntrega[] = data
+        .filter((o: any) => {
+          if (seen.has(o.id)) return false;
+          seen.add(o.id);
+          return true;
+        })
+        .map((o: any) => ({
+          id: o.id,
+          restaurante_nome: o.restaurants?.name || 'Restaurante',
+          data: o.created_at.split('T')[0],
+          valor: Number(o.delivery_fee) || Number(o.total) * 0.15 || 8.50,
+          distancia: '2,5 km',
+          status: 'entregue' as const,
+        }));
       setHistorico(hist);
 
       const today = new Date().toISOString().split('T')[0];
@@ -325,21 +332,15 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
 
     await supabase.from('orders').update({ status: 'delivered' }).eq('id', pedidoAtivo.id);
 
-    const novoHistorico: HistoricoEntrega = {
-      id: pedidoAtivo.id,
-      restaurante_nome: pedidoAtivo.restaurante_nome,
-      data: new Date().toISOString().split('T')[0],
-      valor: pedidoAtivo.valor_entrega,
-      distancia: pedidoAtivo.distancia,
-      status: 'entregue',
-    };
-
-    setHistorico(prev => [novoHistorico, ...prev]);
+    // Update earnings immediately (optimistic) so UI feels snappy
     setGanhosDia(prev => prev + pedidoAtivo.valor_entrega);
     setGanhosSemana(prev => prev + pedidoAtivo.valor_entrega);
     setPedidoAtivo(null);
     setDeliveryStatus('indo_buscar');
+    // fetchOrders → fetchHistorico will add the entry cleanly from DB
+    // (no optimistic historico push to avoid duplicate-key race with realtime)
     fetchOrders();
+    fetchHistorico();
   };
 
   const refreshOrders = async () => { await fetchOrders(); };

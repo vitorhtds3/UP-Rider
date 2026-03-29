@@ -40,6 +40,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // On web the app frequently loses focus (iframes, tab switches, etc.)
+    // so we never stop auto-refresh there — the token would expire silently.
+    if (Platform.OS === 'web') {
+      supabase.auth.startAutoRefresh();
+      return;
+    }
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         supabase.auth.startAutoRefresh();

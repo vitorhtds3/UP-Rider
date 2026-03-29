@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Alert,
   Modal,
   KeyboardAvoidingView,
   Platform,
@@ -24,29 +23,25 @@ export default function ProfileScreen() {
   const [editNome, setEditNome] = useState(entregador?.nome || '');
   const [editTelefone, setEditTelefone] = useState(entregador?.telefone || '');
   const [editVeiculo, setEditVeiculo] = useState(entregador?.veiculo || '');
+  const [savedFeedback, setSavedFeedback] = useState(false);
+
+  // Logout confirm sheet (replaces Alert.alert — blocked in iframes)
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const handleSalvar = () => {
     updateEntregador({ nome: editNome, telefone: editTelefone, veiculo: editVeiculo });
     setEditModal(false);
-    Alert.alert('Perfil atualizado!', 'Suas informacoes foram salvas com sucesso.');
+    setSavedFeedback(true);
+    setTimeout(() => setSavedFeedback(false), 3000);
   };
 
-  const handleLogout = () => {
-    Alert.alert(
-      'Sair da conta',
-      'Tem certeza que deseja sair?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sair',
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            router.replace('/login');
-          }
-        },
-      ]
-    );
+  const handleConfirmLogout = async () => {
+    setIsLoggingOut(true);
+    await logout();
+    setIsLoggingOut(false);
+    setLogoutConfirm(false);
+    router.replace('/login');
   };
 
   const iniciais = entregador?.nome?.split(' ').slice(0, 2).map(n => n[0]).join('') || 'E';
@@ -87,6 +82,14 @@ export default function ProfileScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>Perfil</Text>
         </View>
+
+        {/* Saved feedback banner */}
+        {savedFeedback && (
+          <View style={styles.savedBanner}>
+            <MaterialIcons name="check-circle" size={18} color={Colors.success} />
+            <Text style={styles.savedBannerText}>Perfil atualizado com sucesso!</Text>
+          </View>
+        )}
 
         {/* Avatar Hero */}
         <View style={styles.avatarSection}>
@@ -134,8 +137,12 @@ export default function ProfileScreen() {
           <AccountStatusRow status={entregador?.accountStatus} />
         </View>
 
-        {/* Logout */}
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.85}>
+        {/* Logout Button */}
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={() => setLogoutConfirm(true)}
+          activeOpacity={0.85}
+        >
           <MaterialIcons name="logout" size={20} color={Colors.error} />
           <Text style={styles.logoutText}>Sair da conta</Text>
         </TouchableOpacity>
@@ -177,12 +184,44 @@ export default function ProfileScreen() {
               ))}
 
               <TouchableOpacity style={styles.salvarBtn} onPress={handleSalvar} activeOpacity={0.85}>
+                <MaterialIcons name="check" size={20} color="#fff" />
                 <Text style={styles.salvarBtnText}>Salvar alteracoes</Text>
               </TouchableOpacity>
             </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Logout Confirm Sheet (replaces Alert — blocked in iframes) */}
+      {logoutConfirm && (
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmSheet}>
+            <View style={styles.confirmIconBox}>
+              <MaterialIcons name="logout" size={36} color={Colors.error} />
+            </View>
+            <Text style={styles.confirmTitle}>Sair da conta</Text>
+            <Text style={styles.confirmText}>Tem certeza que deseja sair? Voce precisara entrar novamente.</Text>
+            <View style={styles.confirmActions}>
+              <TouchableOpacity
+                style={styles.confirmBtnCancel}
+                onPress={() => setLogoutConfirm(false)}
+                disabled={isLoggingOut}
+              >
+                <Text style={styles.confirmBtnCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmBtnLogout, isLoggingOut && { opacity: 0.7 }]}
+                onPress={handleConfirmLogout}
+                disabled={isLoggingOut}
+              >
+                <Text style={styles.confirmBtnLogoutText}>
+                  {isLoggingOut ? 'Saindo...' : 'Sair'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -192,6 +231,13 @@ const styles = StyleSheet.create({
   scroll: { paddingBottom: Spacing.xxl },
   header: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md },
   title: { fontSize: FontSize.xxl, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  savedBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: Colors.successLight, borderRadius: Radius.md,
+    marginHorizontal: Spacing.lg, marginBottom: Spacing.sm,
+    padding: Spacing.sm,
+  },
+  savedBannerText: { fontSize: FontSize.sm, color: Colors.success, fontWeight: FontWeight.semibold },
   avatarSection: { alignItems: 'center', paddingVertical: Spacing.xl, paddingHorizontal: Spacing.lg },
   avatarBox: { width: 90, height: 90, borderRadius: Radius.full, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md, shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 6 },
   avatarText: { fontSize: FontSize.xxxl, fontWeight: FontWeight.bold, color: '#fff' },
@@ -221,6 +267,34 @@ const styles = StyleSheet.create({
   editInputLabel: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.textSecondary, marginBottom: 6 },
   editInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.background, borderRadius: Radius.md, borderWidth: 1.5, borderColor: Colors.border, paddingHorizontal: Spacing.md, height: 52 },
   editInput: { flex: 1, fontSize: FontSize.md, color: Colors.textPrimary, includeFontPadding: false },
-  salvarBtn: { backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 56, alignItems: 'center', justifyContent: 'center', marginTop: Spacing.sm, shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 },
+  salvarBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 56, marginTop: Spacing.sm, shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 },
   salvarBtnText: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: '#fff' },
+
+  // Confirm sheet (replaces Alert)
+  confirmOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center', justifyContent: 'flex-end',
+  },
+  confirmSheet: {
+    width: '100%', backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,
+    padding: Spacing.xl, paddingBottom: 32, alignItems: 'center', gap: Spacing.sm,
+  },
+  confirmIconBox: { marginBottom: 4 },
+  confirmTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  confirmText: { fontSize: FontSize.sm, color: Colors.textSubtle, textAlign: 'center', marginBottom: Spacing.sm },
+  confirmActions: { flexDirection: 'row', gap: Spacing.sm, width: '100%', marginTop: 4 },
+  confirmBtnCancel: {
+    flex: 1, borderWidth: 1.5, borderColor: Colors.border,
+    borderRadius: Radius.lg, height: 52,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  confirmBtnCancelText: { fontSize: FontSize.md, fontWeight: FontWeight.semibold, color: Colors.textSecondary },
+  confirmBtnLogout: {
+    flex: 1, backgroundColor: Colors.error,
+    borderRadius: Radius.lg, height: 52,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  confirmBtnLogoutText: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: '#fff' },
 });
