@@ -134,20 +134,33 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     if (!entregador?.user_id) return;
     setIsLoadingOrders(true);
     try {
-      // Use * to capture any extra columns (delivery_address, client_name, coords, etc.)
-      const { data: ordersData, error } = await supabase
-        .from('orders')
-        .select('*, restaurants(name, address, latitude, longitude)')
-        .eq('status', 'pending')
-        .is('driver_id', null)
-        .order('created_at', { ascending: true });
-
-      if (error) {
-        console.error('[Delivery] Erro ao buscar pedidos:', error.message, '| code:', error.code);
+      // 1. Try SECURITY DEFINER RPC — bypasses RLS and any status mismatch
+      let ordersData: any[] | null = null;
+      const { data: rpcOrders, error: rpcErr } = await supabase.rpc('get_available_orders');
+      if (!rpcErr && Array.isArray(rpcOrders)) {
+        ordersData = rpcOrders;
+        console.log('[Delivery] RPC get_available_orders:', rpcOrders.length,
+          rpcOrders.map((o: any) => `id=${o.id} status=${o.status}`));
       } else {
-        console.log('[Delivery] Pedidos disponíveis encontrados:', ordersData?.length ?? 0,
-          ordersData?.map((o: any) => `id=${o.id} status=${o.status} driver_id=${o.driver_id}`));
-        setPedidos((ordersData || []).map((o: any, idx: number) => mapOrder(o, idx)));
+        // 2. Fallback: direct query with broad status filter
+        if (rpcErr) console.warn('[Delivery] RPC get_available_orders falhou:', rpcErr.message);
+        const { data: direct, error: directErr } = await supabase
+          .from('orders')
+          .select('*, restaurants(name, address, latitude, longitude)')
+          .in('status', ['pending', 'new', 'created', 'waiting', 'open', 'accepted'])
+          .is('driver_id', null)
+          .order('created_at', { ascending: true });
+        if (directErr) {
+          console.error('[Delivery] Erro ao buscar pedidos:', directErr.message, '| code:', directErr.code);
+        } else {
+          ordersData = direct;
+          console.log('[Delivery] Direct query pedidos:', direct?.length ?? 0,
+            direct?.map((o: any) => `id=${o.id} status=${o.status}`));
+        }
+      }
+
+      if (ordersData) {
+        setPedidos(ordersData.map((o: any, idx: number) => mapOrder(o, idx)));
       }
 
       // Fetch active order for this driver (driver_id FK = drivers.id, not user_id)
