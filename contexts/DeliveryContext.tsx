@@ -143,8 +143,10 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
         .order('created_at', { ascending: true });
 
       if (error) {
-        console.error('[Delivery] Erro ao buscar pedidos:', error.message);
+        console.error('[Delivery] Erro ao buscar pedidos:', error.message, '| code:', error.code);
       } else {
+        console.log('[Delivery] Pedidos disponíveis encontrados:', ordersData?.length ?? 0,
+          ordersData?.map((o: any) => `id=${o.id} status=${o.status} driver_id=${o.driver_id}`));
         setPedidos((ordersData || []).map((o: any, idx: number) => mapOrder(o, idx)));
       }
 
