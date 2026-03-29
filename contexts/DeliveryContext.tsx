@@ -47,7 +47,7 @@ interface DeliveryContextType {
   aceitarPedido: (pedidoId: string) => Promise<boolean>;
   recusarPedido: (pedidoId: string) => void;
   avancarStatus: () => void;
-  finalizarEntrega: () => Promise<void>;
+  finalizarEntrega: () => Promise<boolean>;
   refreshOrders: () => Promise<void>;
 }
 
@@ -321,21 +321,64 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     await supabase.from('orders').update({ status: next.db }).eq('id', pedidoAtivo.id);
   };
 
-  const finalizarEntrega = async () => {
-    if (!pedidoAtivo || !entregador?.user_id) return;
+  const finalizarEntrega = async (): Promise<boolean> => {
+    if (!pedidoAtivo || !entregador?.user_id) return false;
 
-    await supabase.from('orders').update({ status: 'delivered' }).eq('id', pedidoAtivo.id);
+    const orderId = pedidoAtivo.id;
+    const driverId = entregador.user_id;
+    const earnings = pedidoAtivo.valor_entrega;
 
-    // Update earnings and counter immediately (optimistic) so UI feels snappy
-    setGanhosDia(prev => prev + pedidoAtivo.valor_entrega);
-    setGanhosSemana(prev => prev + pedidoAtivo.valor_entrega);
+    // 1. Try direct UPDATE (works when RLS allows driver to set 'delivered')
+    const { data: updated, error: updateErr } = await supabase
+      .from('orders')
+      .update({
+        status: 'delivered',
+        delivered_at: new Date().toISOString(),
+        driver_earnings: earnings,
+      })
+      .eq('id', orderId)
+      .eq('driver_id', driverId)
+      .in('status', ['delivering', 'ready', 'preparing'])
+      .select('id');
+
+    const directOk = !updateErr && Array.isArray(updated) && updated.length > 0;
+
+    if (!directOk) {
+      console.warn('[Delivery] UPDATE direto falhou, tentando RPC finalize_delivery:', updateErr?.message);
+
+      // 2. Fallback: SECURITY DEFINER RPC (bypasses RLS)
+      const { data: rpcResult, error: rpcErr } = await supabase.rpc('finalize_delivery', {
+        p_order_id: orderId,
+        p_driver_id: driverId,
+        p_earnings: earnings,
+      });
+
+      const rpcOk = !rpcErr && rpcResult?.success === true;
+      if (!rpcOk) {
+        console.error('[Delivery] Falha definitiva ao finalizar entrega:', rpcErr?.message || rpcResult?.error);
+        return false;
+      }
+    }
+
+    // 3. Record status history (best-effort, ignore table-not-found)
+    supabase
+      .from('order_status_history')
+      .insert({ order_id: orderId, status: 'delivered', driver_id: driverId, changed_at: new Date().toISOString() })
+      .then(({ error }) => {
+        if (error && !error.message?.includes('does not exist')) {
+          console.warn('[Delivery] order_status_history insert falhou:', error.message);
+        }
+      });
+
+    // 4. Update local state only after DB success
+    setGanhosDia(prev => prev + earnings);
+    setGanhosSemana(prev => prev + earnings);
     setEntregasHoje(prev => prev + 1);
     setPedidoAtivo(null);
     setDeliveryStatus('indo_buscar');
-    // fetchOrders → fetchHistorico will add the entry cleanly from DB
-    // (no optimistic historico push to avoid duplicate-key race with realtime)
     fetchOrders();
     fetchHistorico();
+    return true;
   };
 
   const refreshOrders = async () => { await fetchOrders(); };

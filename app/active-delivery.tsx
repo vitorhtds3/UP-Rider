@@ -78,6 +78,7 @@ export default function ActiveDeliveryScreen() {
   // Custom confirm state (replaces Alert.alert — blocked in iframes/web)
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [finalizaErro, setFinalizaErro] = useState<string | null>(null);
 
   // Navigation picker state for web
   const [navPickerVisible, setNavPickerVisible] = useState(false);
@@ -219,10 +220,17 @@ export default function ActiveDeliveryScreen() {
 
   const handleConfirmFinalizar = async () => {
     setIsFinalizing(true);
+    setFinalizaErro(null);
     if (locationTimerRef.current) clearInterval(locationTimerRef.current);
-    await finalizarEntrega();
-    setConfirmVisible(false);
+    const ok = await finalizarEntrega();
     setIsFinalizing(false);
+    if (!ok) {
+      // Restart location timer since we're staying on screen
+      locationTimerRef.current = setInterval(updateLocation, LOCATION_UPDATE_INTERVAL);
+      setFinalizaErro('Erro ao registrar entrega. Verifique sua conexao e tente novamente.');
+      return;
+    }
+    setConfirmVisible(false);
     router.replace('/(tabs)');
   };
 
@@ -407,10 +415,16 @@ export default function ActiveDeliveryScreen() {
             </View>
             <Text style={styles.confirmTitle}>Confirmar entrega</Text>
             <Text style={styles.confirmText}>O pedido foi entregue ao cliente?</Text>
+            {finalizaErro ? (
+              <View style={styles.errorBox}>
+                <MaterialIcons name="error-outline" size={16} color={Colors.error} />
+                <Text style={styles.errorText}>{finalizaErro}</Text>
+              </View>
+            ) : null}
             <View style={styles.confirmActions}>
               <TouchableOpacity
                 style={styles.confirmBtnCancel}
-                onPress={() => setConfirmVisible(false)}
+                onPress={() => { setConfirmVisible(false); setFinalizaErro(null); }}
                 disabled={isFinalizing}
               >
                 <Text style={styles.confirmBtnCancelText}>Nao</Text>
@@ -544,6 +558,14 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   confirmBtnOkText: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: '#fff' },
+
+  // Error box inside confirm sheet
+  errorBox: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    backgroundColor: Colors.errorLight, borderRadius: Radius.md,
+    paddingHorizontal: 12, paddingVertical: 10, width: '100%',
+  },
+  errorText: { flex: 1, fontSize: FontSize.xs, color: Colors.error, lineHeight: 18 },
 
   // Nav options
   navOption: {
