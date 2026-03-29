@@ -148,11 +148,12 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
         setPedidos((ordersData || []).map((o: any, idx: number) => mapOrder(o, idx)));
       }
 
-      // Fetch active order for this driver
+      // Fetch active order for this driver (driver_id FK = drivers.id, not user_id)
+      const activeDriverId = entregador.driver_id || entregador.user_id;
       const { data: activeOrder } = await supabase
         .from('orders')
         .select('*, restaurants(name, address, latitude, longitude)')
-        .eq('driver_id', entregador.user_id)
+        .eq('driver_id', activeDriverId)
         .in('status', ['preparing', 'ready', 'delivering'])
         .maybeSingle();
 
@@ -184,10 +185,11 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
 
+    const histDriverId = entregador.driver_id || entregador.user_id;
     const { data } = await supabase
       .from('orders')
       .select(`id, total, delivery_fee, created_at, restaurants (name)`)
-      .eq('driver_id', entregador.user_id)
+      .eq('driver_id', histDriverId)
       .eq('status', 'delivered')
       .gte('created_at', weekAgo.toISOString())
       .order('created_at', { ascending: false });
@@ -275,10 +277,13 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     const pedido = pedidos.find(p => p.id === pedidoId);
     if (!pedido) return false;
 
+    // orders.driver_id is FK → drivers.id (not auth uid)
+    const driverFkId = entregador.driver_id || entregador.user_id;
+
     // 1. Try direct UPDATE (works if RLS allows it)
     const { data: directData, error: directErr } = await supabase
       .from('orders')
-      .update({ driver_id: entregador.user_id, status: 'preparing' })
+      .update({ driver_id: driverFkId, status: 'preparing' })
       .eq('id', pedidoId)
       .is('driver_id', null)
       .select('id');
@@ -291,7 +296,7 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
       // 2. Fallback: SECURITY DEFINER RPC bypasses RLS
       const { data: rpcResult, error: rpcErr } = await supabase.rpc('accept_order', {
         p_order_id: pedidoId,
-        p_driver_id: entregador.user_id,
+        p_driver_id: driverFkId,
       });
 
       if (rpcErr || rpcResult?.success !== true) {
@@ -302,7 +307,7 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     }
 
     setPedidos(prev => prev.filter(p => p.id !== pedidoId));
-    setPedidoAtivo({ ...pedido, status: 'em_andamento', entregador_id: entregador.user_id });
+    setPedidoAtivo({ ...pedido, status: 'em_andamento', entregador_id: driverFkId });
     setDeliveryStatus('indo_buscar');
     return true;
   };
@@ -329,12 +334,14 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     // Optimistic UI update
     setDeliveryStatus(next.delivery);
 
+    const driverFkId = entregador.driver_id || entregador.user_id;
+
     // 1. Try direct UPDATE
     const { data: directData, error: directErr } = await supabase
       .from('orders')
       .update({ status: next.db })
       .eq('id', pedidoAtivo.id)
-      .eq('driver_id', entregador.user_id)
+      .eq('driver_id', driverFkId)
       .select('id');
 
     const directOk = !directErr && Array.isArray(directData) && directData.length > 0;
@@ -343,7 +350,6 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
       console.warn('[Delivery] UPDATE avançar falhou, tentando RPC advance_order_status:', directErr?.message);
       const { data: rpcResult, error: rpcErr } = await supabase.rpc('advance_order_status', {
         p_order_id: pedidoAtivo.id,
-        p_driver_id: entregador.user_id,
         p_new_status: next.db,
       });
       if (rpcErr || rpcResult?.success !== true) {
@@ -357,7 +363,8 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     if (!pedidoAtivo || !entregador?.user_id) return false;
 
     const orderId = pedidoAtivo.id;
-    const driverId = entregador.user_id;
+    // orders.driver_id FK → drivers.id (not auth uid)
+    const driverId = entregador.driver_id || entregador.user_id;
     const earnings = pedidoAtivo.valor_entrega;
 
     // 1. Try direct UPDATE (works when RLS allows driver to set 'delivered')

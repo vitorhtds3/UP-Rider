@@ -102,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const driverDbId    = driverRpc?.drv_id       || driverDirect?.id;
 
       console.log('[Auth] meta:', `name=${meta.name}, status=${meta.status}`);
-      console.log('[Auth] driverData:', `status=${driverStatus}, is_online=${driverOnline}`);
+      console.log('[Auth] driverData:', `status=${driverStatus}, is_online=${driverOnline}, driver_id=${driverDbId}`);
 
       // accountStatus: drivers.status is the source of truth for approval
       const accountStatus = driverStatus || meta.status || 'pending';
