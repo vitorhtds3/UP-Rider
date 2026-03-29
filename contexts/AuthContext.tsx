@@ -253,16 +253,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Update local state immediately
     setEntregador({ ...entregador, ...data });
 
-    // Sync online/offline status to drivers table (by user_id — always available)
+    // Sync online/offline status to drivers table
+    // Try RPC first (SECURITY DEFINER bypasses RLS), fall back to direct update
     if (data.status !== undefined) {
       const isOnlineNow = data.status === 'online';
-      const { error: onlineErr } = await supabase
-        .from('drivers')
-        .update({ is_online: isOnlineNow, last_update: new Date().toISOString() })
-        .eq('user_id', entregador.user_id);
 
-      if (onlineErr) {
-        console.warn('[Auth] failed to update is_online:', onlineErr.message);
+      const { error: rpcErr } = await supabase.rpc('set_driver_online', {
+        p_user_id: entregador.user_id,
+        p_is_online: isOnlineNow,
+      });
+
+      if (rpcErr) {
+        // Fallback: direct update (works if SELECT policy is set on drivers)
+        const { error: updateErr } = await supabase
+          .from('drivers')
+          .update({ is_online: isOnlineNow, last_update: new Date().toISOString() })
+          .eq('user_id', entregador.user_id);
+        if (updateErr) {
+          console.warn('[Auth] is_online sync failed:', updateErr.message);
+        }
       }
 
       // Location tracking — only on native (not web)
