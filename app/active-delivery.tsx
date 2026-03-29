@@ -4,12 +4,12 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Alert,
   ScrollView,
   Linking,
   Platform,
   ActionSheetIOS,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from '@/components/MapWrapper';
@@ -58,6 +58,14 @@ function formatDistance(km: number): string {
   return `${km.toFixed(1).replace('.', ',')} km`;
 }
 
+function openUrl(url: string) {
+  if (Platform.OS === 'web') {
+    try { window.open(url, '_blank'); } catch { Linking.openURL(url); }
+  } else {
+    Linking.openURL(url);
+  }
+}
+
 export default function ActiveDeliveryScreen() {
   const router = useRouter();
   const { pedidoAtivo, deliveryStatus, avancarStatus, finalizarEntrega } = useDelivery();
@@ -66,6 +74,13 @@ export default function ActiveDeliveryScreen() {
   const [driverCoords, setDriverCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [distanceToTarget, setDistanceToTarget] = useState<string | null>(null);
   const locationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Custom confirm state (replaces Alert.alert — blocked in iframes/web)
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+
+  // Navigation picker state for web
+  const [navPickerVisible, setNavPickerVisible] = useState(false);
 
   const pickupCoords = pedidoAtivo?.latitude_coleta && pedidoAtivo?.longitude_coleta
     ? { latitude: pedidoAtivo.latitude_coleta, longitude: pedidoAtivo.longitude_coleta }
@@ -83,15 +98,12 @@ export default function ActiveDeliveryScreen() {
 
   const updateLocation = useCallback(async () => {
     try {
+      if (Platform.OS === 'web') return;
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
-
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
       setDriverCoords(coords);
-
       const dist = haversineDistance(coords.latitude, coords.longitude, targetCoords.latitude, targetCoords.longitude);
       setDistanceToTarget(formatDistance(dist));
     } catch (_) {}
@@ -99,10 +111,10 @@ export default function ActiveDeliveryScreen() {
 
   useEffect(() => {
     updateLocation();
-    locationTimerRef.current = setInterval(updateLocation, LOCATION_UPDATE_INTERVAL);
-    return () => {
-      if (locationTimerRef.current) clearInterval(locationTimerRef.current);
-    };
+    if (Platform.OS !== 'web') {
+      locationTimerRef.current = setInterval(updateLocation, LOCATION_UPDATE_INTERVAL);
+    }
+    return () => { if (locationTimerRef.current) clearInterval(locationTimerRef.current); };
   }, [updateLocation]);
 
   useEffect(() => {
@@ -145,59 +157,60 @@ export default function ActiveDeliveryScreen() {
   const currentStepIdx = STEPS.findIndex(s => s.key === deliveryStatus);
   const currentStep = STEPS[currentStepIdx];
 
-  const openNavigation = () => {
-    const encodedAddress = encodeURIComponent(targetAddress);
+  // ── Navigation button handler ──
+  const launchGoogleMaps = () => {
     const { latitude, longitude } = targetCoords;
+    openUrl(`https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`);
+  };
 
-    const launchNavigator = (idx: number) => {
-      const urls: Record<number, string> = {
-        0: `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`,
-        1: `waze://?ll=${latitude},${longitude}&navigate=yes`,
-        2: `maps://?daddr=${latitude},${longitude}`,
-      };
-      const url = urls[idx];
-      if (!url) return;
-      Linking.canOpenURL(url).then(supported => {
-        Linking.openURL(
-          supported ? url : `https://www.google.com/maps/dir/?api=1&destination=${encodedAddress}`
-        );
-      });
-    };
+  const launchWaze = () => {
+    const { latitude, longitude } = targetCoords;
+    openUrl(`waze://?ll=${latitude},${longitude}&navigate=yes`);
+  };
 
+  const launchAppleMaps = () => {
+    const { latitude, longitude } = targetCoords;
+    openUrl(`maps://?daddr=${latitude},${longitude}`);
+  };
+
+  const openNavigation = () => {
+    if (Platform.OS === 'web') {
+      // On web, show custom picker (Alert is blocked in iframes)
+      setNavPickerVisible(true);
+      return;
+    }
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         { options: ['Google Maps', 'Waze', 'Apple Maps', 'Cancelar'], cancelButtonIndex: 3, title: 'Abrir navegacao em' },
-        launchNavigator
+        (idx) => {
+          if (idx === 0) launchGoogleMaps();
+          else if (idx === 1) launchWaze();
+          else if (idx === 2) launchAppleMaps();
+        }
       );
     } else {
-      Alert.alert('Abrir navegacao', 'Escolha o aplicativo de mapas:', [
-        { text: 'Google Maps', onPress: () => launchNavigator(0) },
-        { text: 'Waze', onPress: () => launchNavigator(1) },
-        { text: 'Cancelar', style: 'cancel' },
-      ]);
+      // Android — show custom picker (more reliable than Alert in some envs)
+      setNavPickerVisible(true);
     }
   };
 
+  // ── Advance / Finalize handler ──
   const handleAvancar = () => {
     if (deliveryStatus === 'a_caminho') {
-      Alert.alert(
-        'Finalizar entrega',
-        'Confirma que o pedido foi entregue ao cliente?',
-        [
-          { text: 'Nao', style: 'cancel' },
-          {
-            text: 'Sim, finalizar',
-            onPress: async () => {
-              if (locationTimerRef.current) clearInterval(locationTimerRef.current);
-              await finalizarEntrega();
-              router.replace('/(tabs)');
-            },
-          },
-        ]
-      );
+      // Show in-screen confirm instead of Alert (Alert.alert is blocked in iframes)
+      setConfirmVisible(true);
     } else {
       avancarStatus();
     }
+  };
+
+  const handleConfirmFinalizar = async () => {
+    setIsFinalizing(true);
+    if (locationTimerRef.current) clearInterval(locationTimerRef.current);
+    await finalizarEntrega();
+    setConfirmVisible(false);
+    setIsFinalizing(false);
+    router.replace('/(tabs)');
   };
 
   const polylineCoords = driverCoords
@@ -371,6 +384,73 @@ export default function ActiveDeliveryScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* ── Inline Confirm: Finalizar Entrega ── */}
+      {confirmVisible && (
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmSheet}>
+            <View style={styles.confirmIconBox}>
+              <MaterialIcons name="check-circle" size={40} color={Colors.success} />
+            </View>
+            <Text style={styles.confirmTitle}>Confirmar entrega</Text>
+            <Text style={styles.confirmText}>O pedido foi entregue ao cliente?</Text>
+            <View style={styles.confirmActions}>
+              <TouchableOpacity
+                style={styles.confirmBtnCancel}
+                onPress={() => setConfirmVisible(false)}
+                disabled={isFinalizing}
+              >
+                <Text style={styles.confirmBtnCancelText}>Nao</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmBtnOk, isFinalizing && { opacity: 0.7 }]}
+                onPress={handleConfirmFinalizar}
+                disabled={isFinalizing}
+              >
+                <Text style={styles.confirmBtnOkText}>
+                  {isFinalizing ? 'Finalizando...' : 'Sim, finalizar'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* ── Inline Nav Picker ── */}
+      {navPickerVisible && (
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmSheet}>
+            <Text style={styles.confirmTitle}>Abrir navegacao em</Text>
+            <Text style={styles.confirmText}>
+              {isGoingToRestaurant ? 'Rota ate o restaurante' : 'Rota ate o cliente'}
+            </Text>
+
+            <TouchableOpacity style={styles.navOption} onPress={() => { setNavPickerVisible(false); launchGoogleMaps(); }}>
+              <MaterialIcons name="map" size={22} color={Colors.primary} />
+              <Text style={styles.navOptionText}>Google Maps</Text>
+              <MaterialIcons name="chevron-right" size={20} color={Colors.textSubtle} />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.navOption} onPress={() => { setNavPickerVisible(false); launchWaze(); }}>
+              <MaterialIcons name="directions-car" size={22} color="#33CCFF" />
+              <Text style={styles.navOptionText}>Waze</Text>
+              <MaterialIcons name="chevron-right" size={20} color={Colors.textSubtle} />
+            </TouchableOpacity>
+
+            {Platform.OS === 'ios' && (
+              <TouchableOpacity style={styles.navOption} onPress={() => { setNavPickerVisible(false); launchAppleMaps(); }}>
+                <MaterialIcons name="map" size={22} color="#000" />
+                <Text style={styles.navOptionText}>Apple Maps</Text>
+                <MaterialIcons name="chevron-right" size={20} color={Colors.textSubtle} />
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity style={styles.confirmBtnCancel} onPress={() => setNavPickerVisible(false)}>
+              <Text style={styles.confirmBtnCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -423,4 +503,40 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: FontSize.xs, color: Colors.textSubtle, marginTop: 2 },
   actionBtn: { backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 58, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10, elevation: 6 },
   actionBtnText: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: '#fff' },
+
+  // Confirm overlay (replaces Alert)
+  confirmOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center', justifyContent: 'flex-end',
+  },
+  confirmSheet: {
+    width: '100%', backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,
+    padding: Spacing.xl, paddingBottom: 32, alignItems: 'center', gap: Spacing.sm,
+  },
+  confirmIconBox: { marginBottom: 4 },
+  confirmTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.bold, color: Colors.textPrimary },
+  confirmText: { fontSize: FontSize.sm, color: Colors.textSubtle, textAlign: 'center', marginBottom: Spacing.sm },
+  confirmActions: { flexDirection: 'row', gap: Spacing.sm, width: '100%', marginTop: 4 },
+  confirmBtnCancel: {
+    flex: 1, borderWidth: 1.5, borderColor: Colors.border,
+    borderRadius: Radius.lg, height: 52,
+    alignItems: 'center', justifyContent: 'center', width: '100%',
+  },
+  confirmBtnCancelText: { fontSize: FontSize.md, fontWeight: FontWeight.semibold, color: Colors.textSecondary },
+  confirmBtnOk: {
+    flex: 2, backgroundColor: Colors.success,
+    borderRadius: Radius.lg, height: 52,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  confirmBtnOkText: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: '#fff' },
+
+  // Nav options
+  navOption: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    width: '100%', paddingVertical: 14, paddingHorizontal: Spacing.sm,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  navOptionText: { flex: 1, fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.textPrimary },
 });
