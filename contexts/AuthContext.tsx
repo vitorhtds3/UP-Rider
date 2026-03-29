@@ -114,12 +114,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Fetch driver profile
-      const { data: driverData } = await supabase
+      // Fetch driver profile via SECURITY DEFINER RPC to bypass RLS on SELECT
+      const { data: driverRpcRow } = await supabase
+        .rpc('get_driver_status', { p_user_id: userId })
+        .maybeSingle();
+
+      // Also try direct SELECT as fallback (works if RLS allows it)
+      const { data: driverDirect } = await supabase
         .from('drivers')
         .select('*')
         .eq('user_id', userId)
         .maybeSingle();
+
+      // Merge: prefer RPC result for status (bypasses RLS), use direct for other fields
+      const driverData = driverDirect || driverRpcRow
+        ? {
+            id: driverRpcRow?.drv_id || driverDirect?.id,
+            status: driverRpcRow?.drv_status || driverDirect?.status,
+            is_online: driverRpcRow?.drv_is_online ?? driverDirect?.is_online ?? false,
+            vehicle_type: driverDirect?.vehicle_type,
+          }
+        : null;
 
       // Resolve vehicle — prefer DB row, fall back to auth metadata
       const { data: authResp2 } = await supabase.auth.getUser();
@@ -150,7 +165,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // accountStatus comes from drivers.status first (admin manages approval there),
       // falling back to users.status, then auth metadata status
+      console.log('[Auth] userData:', userData ? `status=${userData.status}` : 'null/blocked');
+      console.log('[Auth] driverData:', driverData ? `status=${driverData.status}, is_online=${driverData.is_online}` : 'null/blocked');
       const accountStatus = driverData?.status || resolvedUser.status || 'pending';
+      console.log('[Auth] accountStatus resolved to:', accountStatus);
 
       setEntregador({
         id: userId,
