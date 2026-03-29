@@ -89,18 +89,21 @@ export default function RegisterScreen() {
         return;
       }
 
-      // Single RPC call creates both users + drivers rows with SECURITY DEFINER
-      // (bypasses RLS that blocks direct INSERT on both tables)
-      const { error: rpcError } = await supabase.rpc('register_driver', {
-        p_user_id: userId,
-        p_name:    nome.trim(),
-        p_email:   cleanEmail,
-        p_phone:   cleanPhone,
-      });
+      // Create only the drivers row (Auth already has all user info in metadata)
+      // Try direct INSERT first (works after signUp since user is authenticated)
+      const { error: insertErr } = await supabase
+        .from('drivers')
+        .insert({ user_id: userId, status: 'pending', is_online: false });
 
-      if (rpcError) {
-        console.warn('[Register] register_driver RPC failed:', rpcError.message);
-        // Data is still saved in auth metadata as fallback
+      if (insertErr) {
+        // Fallback: SECURITY DEFINER RPC that only creates the drivers row
+        const { error: rpcError } = await supabase.rpc('create_driver_row', {
+          p_user_id: userId,
+        });
+        if (rpcError) {
+          console.warn('[Register] create_driver_row RPC failed:', rpcError.message);
+          // Auth metadata still saved — admin can create drivers row manually
+        }
       }
 
       setSucesso(true);
