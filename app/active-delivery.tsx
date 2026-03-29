@@ -134,8 +134,8 @@ export default function ActiveDeliveryScreen() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <MaterialIcons name="delivery-dining" size={48} color={Colors.textSubtle} />
           <Text style={{ fontSize: FontSize.md, color: Colors.textSubtle, marginTop: Spacing.md }}>Nenhuma entrega ativa</Text>
-          <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
-            <Text style={{ color: Colors.primary, fontWeight: FontWeight.semibold }}>Voltar</Text>
+          <TouchableOpacity onPress={() => router.replace('/(tabs)')} style={{ marginTop: 20 }}>
+            <Text style={{ color: Colors.primary, fontWeight: FontWeight.semibold }}>Voltar ao inicio</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -208,7 +208,7 @@ export default function ActiveDeliveryScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.replace('/(tabs)')}>
           <MaterialIcons name="arrow-back" size={22} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Entrega ativa</Text>

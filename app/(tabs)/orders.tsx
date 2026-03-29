@@ -72,6 +72,7 @@ export default function OrdersScreen() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   const isOnline = entregador?.status === 'online';
+  const [isAccepting, setIsAccepting] = useState(false);
 
   const handleTimerExpire = useCallback((orderId: string) => {
     recusarPedido(orderId);
@@ -85,8 +86,8 @@ export default function OrdersScreen() {
     if (isUrgent && pedidoAtual) {
       const anim = Animated.loop(
         Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.05, duration: 300, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1.05, duration: 300, useNativeDriver: false }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 300, useNativeDriver: false }),
         ])
       );
       anim.start();
@@ -96,14 +97,19 @@ export default function OrdersScreen() {
     }
   }, [isUrgent, pedidoAtual?.id]);
 
-  const handleAceitar = useCallback(() => {
-    if (!pedidoAtual) return;
-    if (pedidoAtivo) {
-      return;
+  const handleAceitar = useCallback(async () => {
+    if (!pedidoAtual || pedidoAtivo || isAccepting) return;
+    setIsAccepting(true);
+    try {
+      const aceito = await aceitarPedido(pedidoAtual.id);
+      if (aceito) {
+        router.push('/active-delivery');
+      }
+      // If aceito === false, order was taken by another driver — realtime refreshes the queue
+    } finally {
+      setIsAccepting(false);
     }
-    aceitarPedido(pedidoAtual.id);
-    router.push('/active-delivery');
-  }, [pedidoAtual, pedidoAtivo, aceitarPedido, router]);
+  }, [pedidoAtual, pedidoAtivo, isAccepting, aceitarPedido, router]);
 
   const handleRecusar = useCallback(() => {
     if (!pedidoAtual) return;
@@ -230,13 +236,19 @@ export default function OrdersScreen() {
               <Text style={[styles.btnRecusarText, pedidoAtivo ? { color: Colors.textSubtle } : null]}>Recusar</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.btnAceitar, pedidoAtivo ? styles.btnDisabled : null]}
+              style={[styles.btnAceitar, (pedidoAtivo || isAccepting) ? styles.btnDisabled : null]}
               onPress={handleAceitar}
               activeOpacity={0.85}
-              disabled={!!pedidoAtivo}
+              disabled={!!pedidoAtivo || isAccepting}
             >
-              <MaterialIcons name="check" size={20} color={pedidoAtivo ? Colors.textSubtle : '#fff'} />
-              <Text style={[styles.btnAceitarText, pedidoAtivo ? { color: Colors.textSubtle } : null]}>Aceitar e ir</Text>
+              {isAccepting ? (
+                <Text style={[styles.btnAceitarText, { color: Colors.textSubtle }]}>Aceitando...</Text>
+              ) : (
+                <>
+                  <MaterialIcons name="check" size={20} color={pedidoAtivo ? Colors.textSubtle : '#fff'} />
+                  <Text style={[styles.btnAceitarText, pedidoAtivo ? { color: Colors.textSubtle } : null]}>Aceitar e ir</Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
         </View>

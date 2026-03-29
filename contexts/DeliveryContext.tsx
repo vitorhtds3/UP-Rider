@@ -43,7 +43,7 @@ interface DeliveryContextType {
   ganhosDia: number;
   ganhosSemana: number;
   isLoadingOrders: boolean;
-  aceitarPedido: (pedidoId: string) => Promise<void>;
+  aceitarPedido: (pedidoId: string) => Promise<boolean>;
   recusarPedido: (pedidoId: string) => void;
   avancarStatus: () => void;
   finalizarEntrega: () => Promise<void>;
@@ -268,12 +268,12 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     return () => { supabase.removeChannel(channel); };
   }, [fetchOrders, fetchHistorico]);
 
-  const aceitarPedido = async (pedidoId: string) => {
-    if (!entregador?.user_id) return;
+  const aceitarPedido = async (pedidoId: string): Promise<boolean> => {
+    if (!entregador?.user_id) return false;
     const pedido = pedidos.find(p => p.id === pedidoId);
-    if (!pedido) return;
+    if (!pedido) return false;
 
-    const { error } = await supabase
+    const { error, count } = await supabase
       .from('orders')
       .update({
         driver_id: entregador.user_id,
@@ -281,19 +281,20 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
         assigned_at: new Date().toISOString(),
       })
       .eq('id', pedidoId)
-      .is('driver_id', null); // Only accept if still unassigned (race condition guard)
+      .is('driver_id', null) // Only accept if still unassigned (race condition guard)
+      .select('id');
 
     if (error) {
       console.error('[Delivery] Erro ao aceitar pedido:', error.message);
-      // Refresh in case another driver already took it
       fetchOrders();
-      return;
+      return false;
     }
 
     // Remove from local queue — realtime will propagate to all other drivers
     setPedidos(prev => prev.filter(p => p.id !== pedidoId));
     setPedidoAtivo({ ...pedido, status: 'em_andamento', entregador_id: entregador.user_id });
     setDeliveryStatus('indo_buscar');
+    return true;
   };
 
   const recusarPedido = (pedidoId: string) => {
@@ -326,7 +327,7 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
 
     const novoHistorico: HistoricoEntrega = {
       id: pedidoAtivo.id,
-      restaurante_nome: pedidoAtual?.restaurante_nome ?? pedidoAtivo.restaurante_nome,
+      restaurante_nome: pedidoAtivo.restaurante_nome,
       data: new Date().toISOString().split('T')[0],
       valor: pedidoAtivo.valor_entrega,
       distancia: pedidoAtivo.distancia,
