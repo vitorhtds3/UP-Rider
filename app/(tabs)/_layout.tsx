@@ -8,8 +8,8 @@ import { useNotifications } from '@/hooks/useNotifications';
 import { Colors } from '@/constants/theme';
 
 function OrdersTabIcon({ color, size }: { color: string; size: number }) {
-  const { pedidosDisponiveis } = useDelivery();
-  const count = pedidosDisponiveis.length;
+  const { totalDisponiveis } = useDelivery();
+  const count = totalDisponiveis;
   return (
     <View>
       <MaterialIcons name="receipt-long" size={size} color={color} />
