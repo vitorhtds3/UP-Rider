@@ -141,8 +141,7 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
       const { data: rpcOrders, error: rpcErr } = await supabase.rpc('get_available_orders');
       if (!rpcErr && Array.isArray(rpcOrders)) {
         ordersData = rpcOrders;
-        console.log('[Delivery] RPC pedidos disponiveis:', rpcOrders.length,
-          rpcOrders.map((o: any) => `id=${o.id?.slice(0,8)} status=${o.status} driver=${o.driver_id}`));
+        console.log('[Delivery] Pedidos disponiveis:', rpcOrders.length);
       } else {
         if (rpcErr) console.warn('[Delivery] RPC get_available_orders falhou:', rpcErr.message);
         // 2. Fallback: direct query — driver_id IS NULL, any status except final
@@ -153,7 +152,7 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
           .not('status', 'in', '("delivered","cancelled")')
           .order('created_at', { ascending: true });
         if (directErr) {
-          console.error('[Delivery] Erro ao buscar pedidos:', directErr.message, directErr.code);
+          console.warn('[Delivery] Direct query falhou:', directErr.message);
           // 3. Last resort: fetch ALL orders with null driver_id regardless of status
           const { data: any_orders } = await supabase
             .from('orders')
@@ -161,30 +160,10 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
             .is('driver_id', null)
             .order('created_at', { ascending: true });
           ordersData = any_orders || [];
-          console.log('[Delivery] Fallback total (sem filtro status):', ordersData.length);
         } else {
           ordersData = direct || [];
-          console.log('[Delivery] Direct query pedidos:', direct?.length ?? 0,
-            direct?.map((o: any) => `id=${o.id?.slice(0,8)} status=${o.status}`));
         }
       }
-
-      // ── DEBUG: mostra TODOS os pedidos visíveis para este driver ──────────
-      const { data: dbAll, error: dbAllErr } = await supabase
-        .from('orders')
-        .select('id, status, driver_id, delivery_fee, total, created_at')
-        .order('created_at', { ascending: false })
-        .limit(10);
-      if (dbAllErr) {
-        console.warn('[DEBUG] Nao conseguiu listar orders:', dbAllErr.message);
-      } else {
-        console.log('[DEBUG] Todos os orders visiveis no banco (' + (dbAll?.length ?? 0) + '):',
-          dbAll?.map((o: any) =>
-            `id=${o.id?.slice(0,8)} status=${o.status} driver=${o.driver_id?.slice(0,8) || 'NULL'} fee=${o.delivery_fee} total=${o.total}`
-          )
-        );
-      }
-      // ────────────────────────────────────────────────────────────────────
 
       if (ordersData !== null) {
         setPedidos(ordersData.map((o: any, idx: number) => mapOrder(o, idx)));
@@ -236,10 +215,7 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
       .gte('created_at', weekAgo.toISOString())
       .order('created_at', { ascending: false });
 
-    console.log('[Historico] Buscando ordens entregues do driver:', histDriverId);
     if (data) {
-      console.log('[Historico] Ordens entregues encontradas:', data.length,
-        data.map((o: any) => `id=${o.id?.slice(0,8)} fee=${o.delivery_fee} total=${o.total} data=${o.created_at?.split('T')[0]}`));
       const seen = new Set<string>();
       const hist: HistoricoEntrega[] = data
         .filter((o: any) => {
@@ -449,15 +425,11 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // 3. Record status history (best-effort, ignore table-not-found)
+    // 3. Record status history (best-effort — silently ignored if table/column missing)
     supabase
       .from('order_status_history')
-      .insert({ order_id: orderId, status: 'delivered', driver_id: driverId, changed_at: new Date().toISOString() })
-      .then(({ error }) => {
-        if (error && !error.message?.includes('does not exist')) {
-          console.warn('[Delivery] order_status_history insert falhou:', error.message);
-        }
-      });
+      .insert({ order_id: orderId, status: 'delivered', driver_id: driverId })
+      .then(() => {});  // ignore errors — optional audit table
 
     // 4. Update local state only after DB success
     setGanhosDia(prev => prev + earnings);
