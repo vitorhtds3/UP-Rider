@@ -18,7 +18,7 @@ import { Colors, Spacing, Radius, FontSize, FontWeight } from '@/constants/theme
 export default function DashboardScreen() {
   const router = useRouter();
   const { entregador, updateEntregador } = useAuth();
-  const { pedidoAtual, totalDisponiveis, pedidoAtivo, ganhosDia } = useDelivery();
+  const { pedidoAtual, totalDisponiveis, pedidoAtivo, ganhosDia, entregasHoje } = useDelivery();
 
   const isOnline = entregador?.status === 'online';
 
@@ -124,7 +124,7 @@ export default function DashboardScreen() {
           </View>
           <View style={styles.statCard}>
             <MaterialIcons name="delivery-dining" size={20} color={Colors.success} />
-            <Text style={styles.statValue}>{entregador?.entregas_hoje || 0}</Text>
+            <Text style={styles.statValue}>{entregasHoje}</Text>
             <Text style={styles.statLabel}>Entregas hoje</Text>
           </View>
           <View style={styles.statCard}>

@@ -108,27 +108,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const accountStatus = driverStatus || meta.status || 'pending';
       console.log('[Auth] accountStatus resolved to:', accountStatus);
 
-      // Compute today's earnings
-      const today = new Date().toISOString().split('T')[0];
-      const { data: ordersToday } = await supabase
-        .from('orders')
-        .select('delivery_fee, total')
-        .eq('driver_id', userId)
-        .eq('status', 'delivered')
-        .gte('created_at', today);
-
-      const ganhosDia = (ordersToday || []).reduce(
-        (sum: number, o: any) => sum + (Number(o.delivery_fee) || Number(o.total) * 0.15 || 0),
-        0
-      );
-
-      const { count: entregasHoje } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('driver_id', userId)
-        .eq('status', 'delivered')
-        .gte('created_at', today);
-
       setEntregador({
         id: userId,
         user_id: userId,
@@ -138,8 +117,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         veiculo: meta.vehicle || 'Moto',
         foto: '',
         status: driverOnline ? 'online' : 'offline',
-        ganhos_dia: ganhosDia,
-        entregas_hoje: entregasHoje || 0,
+        ganhos_dia: 0,
+        entregas_hoje: 0,
         driver_id: driverDbId,
         role: meta.role || 'driver',
         accountStatus,

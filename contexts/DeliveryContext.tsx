@@ -42,6 +42,7 @@ interface DeliveryContextType {
   historico: HistoricoEntrega[];
   ganhosDia: number;
   ganhosSemana: number;
+  entregasHoje: number;
   isLoadingOrders: boolean;
   aceitarPedido: (pedidoId: string) => Promise<boolean>;
   recusarPedido: (pedidoId: string) => void;
@@ -118,6 +119,7 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
   const [historico, setHistorico] = useState<HistoricoEntrega[]>([]);
   const [ganhosDia, setGanhosDia] = useState(0);
   const [ganhosSemana, setGanhosSemana] = useState(0);
+  const [entregasHoje, setEntregasHoje] = useState(0);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
 
   // The single current order exposed to the UI (first in queue)
@@ -209,8 +211,10 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
       setHistorico(hist);
 
       const today = new Date().toISOString().split('T')[0];
-      setGanhosDia(hist.filter(h => h.data === today).reduce((s, h) => s + h.valor, 0));
+      const historicoHoje = hist.filter(h => h.data === today);
+      setGanhosDia(historicoHoje.reduce((s, h) => s + h.valor, 0));
       setGanhosSemana(hist.reduce((s, h) => s + h.valor, 0));
+      setEntregasHoje(historicoHoje.length);
     }
   }, [entregador?.user_id]);
 
@@ -322,9 +326,10 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
 
     await supabase.from('orders').update({ status: 'delivered' }).eq('id', pedidoAtivo.id);
 
-    // Update earnings immediately (optimistic) so UI feels snappy
+    // Update earnings and counter immediately (optimistic) so UI feels snappy
     setGanhosDia(prev => prev + pedidoAtivo.valor_entrega);
     setGanhosSemana(prev => prev + pedidoAtivo.valor_entrega);
+    setEntregasHoje(prev => prev + 1);
     setPedidoAtivo(null);
     setDeliveryStatus('indo_buscar');
     // fetchOrders → fetchHistorico will add the entry cleanly from DB
@@ -344,6 +349,7 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
       historico,
       ganhosDia,
       ganhosSemana,
+      entregasHoje,
       isLoadingOrders,
       aceitarPedido,
       recusarPedido,
