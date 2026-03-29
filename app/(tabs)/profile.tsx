@@ -51,6 +51,25 @@ export default function ProfileScreen() {
 
   const iniciais = entregador?.nome?.split(' ').slice(0, 2).map(n => n[0]).join('') || 'E';
 
+  const AccountStatusRow = ({ status }: { status?: string }) => {
+    const config = {
+      active: { color: Colors.success, bg: Colors.successLight, label: 'Conta ativa', desc: 'Aprovada e pronta para entregas' },
+      pending: { color: Colors.warning, bg: Colors.warningLight, label: 'Em analise', desc: 'Aguardando aprovacao da equipe' },
+      suspended: { color: Colors.error, bg: Colors.errorLight, label: 'Conta suspensa', desc: 'Entre em contato com o suporte' },
+      rejected: { color: Colors.error, bg: Colors.errorLight, label: 'Cadastro recusado', desc: 'Seu cadastro nao foi aprovado' },
+    };
+    const current = config[status as keyof typeof config] || config.pending;
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: Spacing.sm, backgroundColor: current.bg, borderRadius: Radius.md, padding: Spacing.sm, marginTop: 4 }}>
+        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: current.color }} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.infoValue, { color: current.color }]}>{current.label}</Text>
+          <Text style={styles.infoLabel}>{current.desc}</Text>
+        </View>
+      </View>
+    );
+  };
+
   const InfoRow = ({ icon, label, value }: { icon: string; label: string; value: string }) => (
     <View style={styles.infoRow}>
       <MaterialIcons name={icon as any} size={20} color={Colors.textSubtle} style={styles.infoIcon} />
@@ -112,13 +131,7 @@ export default function ProfileScreen() {
         {/* Status */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Status da conta</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: Spacing.sm }}>
-            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.success }} />
-            <View>
-              <Text style={styles.infoValue}>Conta verificada</Text>
-              <Text style={styles.infoLabel}>Ativa e aprovada</Text>
-            </View>
-          </View>
+          <AccountStatusRow status={entregador?.accountStatus} />
         </View>
 
         {/* Logout */}

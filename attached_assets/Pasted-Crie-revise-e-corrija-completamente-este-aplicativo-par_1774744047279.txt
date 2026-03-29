@@ -1,0 +1,161 @@
+Crie, revise e corrija completamente este aplicativo para funcionamento profissional, garantindo que toda a lógica, rotas, botões e integração com backend e banco de dados estejam 100% corretos.
+
+CONFIGURAÇÃO:
+APP_TYPE = [client | restaurant | driver | admin]
+
+OBJETIVO:
+Garantir que o app funcione perfeitamente dentro do sistema completo:
+Cliente → Backend → Restaurante → Entregador → Finalização
+
+━━━━━━━━━━━━━━━━━━━━━━━
+1. TELA INICIAL (SPLASH SCREEN)
+━━━━━━━━━━━━━━━━━━━━━━━
+- Criar tela inicial com a logo do app centralizada
+- Aplicar animação suave (fade ou scale)
+- Duração EXATA de 4 segundos
+- Após 4 segundos:
+  → Se usuário logado → ir para home
+  → Se não logado → ir para login
+- Não permitir travamentos ou tela branca
+
+━━━━━━━━━━━━━━━━━━━━━━━
+2. VERIFICAÇÃO DE TODOS OS BOTÕES
+━━━━━━━━━━━━━━━━━━━━━━━
+- Mapear TODOS os botões do app
+- Garantir que cada botão tenha ação funcional
+- Corrigir botões sem ação (onClick vazio)
+- Validar:
+  → navegação correta
+  → chamadas de API
+  → feedback visual (loading, sucesso, erro)
+- Nenhum botão pode ficar sem resposta
+
+━━━━━━━━━━━━━━━━━━━━━━━
+3. AUTENTICAÇÃO (LOGIN E CADASTRO)
+━━━━━━━━━━━━━━━━━━━━━━━
+- Corrigir login e registro completamente
+- Enviar dados corretamente para o backend
+- Salvar token JWT
+- Manter sessão persistente
+- Validar role do usuário
+
+━━━━━━━━━━━━━━━━━━━━━━━
+4. CADASTRO POR TIPO DE APP
+━━━━━━━━━━━━━━━━━━━━━━━
+APP_TYPE = client:
+→ salvar em users (role = client)
+
+APP_TYPE = restaurant:
+→ salvar em restaurants
+
+APP_TYPE = driver:
+→ salvar em drivers
+
+APP_TYPE = admin:
+→ salvar em users (role = admin)
+
+━━━━━━━━━━━━━━━━━━━━━━━
+5. CONTROLE DE ACESSO (SEGURANÇA)
+━━━━━━━━━━━━━━━━━━━━━━━
+- Garantir que cada app só acesse seus dados
+- Bloquear acesso indevido
+- Validar role antes de cada requisição
+
+━━━━━━━━━━━━━━━━━━━━━━━
+6. ROTAS E INTEGRAÇÃO COM BACKEND
+━━━━━━━━━━━━━━━━━━━━━━━
+
+CLIENT:
+- POST /orders
+- GET /orders/user
+
+RESTAURANT:
+- GET /orders/restaurant
+- PUT /orders/:id/accept
+- PUT /orders/:id/reject
+
+DRIVER:
+- GET /orders/available
+- PUT /orders/:id/take
+- PUT /orders/:id/delivered
+
+ADMIN:
+- GET /users
+- GET /orders
+- PUT /approve/restaurant
+- PUT /approve/driver
+
+━━━━━━━━━━━━━━━━━━━━━━━
+7. FLUXO COMPLETO DO PEDIDO
+━━━━━━━━━━━━━━━━━━━━━━━
+- Cliente cria pedido → status = pending
+- Restaurante aceita → status = accepted
+- Entregador aceita → status = on_delivery
+- Entregador finaliza → status = completed
+
+Validar que:
+- Cada mudança atualiza banco corretamente
+- Cada app recebe atualização correta
+
+━━━━━━━━━━━━━━━━━━━━━━━
+8. ATUALIZAÇÃO EM TEMPO REAL
+━━━━━━━━━━━━━━━━━━━━━━━
+- Implementar polling ou websocket
+- Atualizar tela automaticamente ao mudar status
+- Evitar necessidade de refresh manual
+
+━━━━━━━━━━━━━━━━━━━━━━━
+9. NOTIFICAÇÕES
+━━━━━━━━━━━━━━━━━━━━━━━
+- Cliente: status do pedido
+- Restaurante: novo pedido
+- Entregador: pedidos disponíveis
+
+━━━━━━━━━━━━━━━━━━━━━━━
+10. TRATAMENTO DE ERROS
+━━━━━━━━━━━━━━━━━━━━━━━
+- Corrigir falhas de API
+- Evitar crashes
+- Exibir mensagens claras
+- Implementar fallback de rede
+
+━━━━━━━━━━━━━━━━━━━━━━━
+11. VALIDAÇÃO COM BANCO DE DADOS
+━━━━━━━━━━━━━━━━━━━━━━━
+- Garantir que todos dados vão para tabelas corretas
+- Validar IDs (user_id, restaurant_id, driver_id)
+- Não permitir dados inconsistentes
+
+━━━━━━━━━━━━━━━━━━━━━━━
+12. INTERFACE PROFISSIONAL
+━━━━━━━━━━━━━━━━━━━━━━━
+- Layout moderno
+- Loading states
+- Feedback visual
+- Navegação fluida
+
+━━━━━━━━━━━━━━━━━━━━━━━
+13. TESTE AUTOMÁTICO INTERNO
+━━━━━━━━━━━━━━━━━━━━━━━
+Simular:
+- Cadastro
+- Login
+- Criar pedido
+- Aceitar pedido
+- Entrega
+
+Corrigir qualquer erro encontrado automaticamente
+
+━━━━━━━━━━━━━━━━━━━━━━━
+14. RESULTADO FINAL
+━━━━━━━━━━━━━━━━━━━━━━━
+- App sem bugs
+- Todas rotas funcionando
+- Todos botões funcionando
+- Integração perfeita com backend
+- Experiência profissional nível iFood / Uber Eats
+
+IMPORTANTE:
+- Não misturar funções entre apps
+- Respeitar estritamente o APP_TYPE
+- Garantir lógica 100% funcional

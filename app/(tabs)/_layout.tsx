@@ -69,13 +69,13 @@ export default function TabLayout() {
     height: Platform.select({
       ios: insets.bottom + 60,
       android: insets.bottom + 60,
-      default: 70,
+      default: 84,
     }),
     paddingTop: 8,
     paddingBottom: Platform.select({
       ios: insets.bottom + 8,
       android: insets.bottom + 8,
-      default: 8,
+      default: 34,
     }),
     paddingHorizontal: 16,
     backgroundColor: Colors.tabBar,

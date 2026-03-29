@@ -15,7 +15,6 @@ export default function Index() {
     );
   }
 
-  // Account pending approval
   if (isAuthenticated && entregador?.accountStatus === 'pending') {
     return (
       <View style={styles.pendingContainer}>
@@ -37,7 +36,7 @@ export default function Index() {
     return <Redirect href="/(tabs)" />;
   }
 
-  return <Redirect href="/splash" />;
+  return <Redirect href="/login" />;
 }
 
 const styles = StyleSheet.create({

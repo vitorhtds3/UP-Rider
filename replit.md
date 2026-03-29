@@ -53,3 +53,14 @@ The workflow "Start application" is configured to run this command automatically
 Configured as a static deployment:
 - **Build**: `npx expo export --platform web`
 - **Output**: `dist/` directory
+
+## Bug Fixes Applied (March 2026)
+
+1. **Splash screen auth check** — now checks Supabase session and routes to `/` (authenticated) or `/login` (unauthenticated) after exactly ~4 seconds of animation
+2. **Index routing** — properly handles: loading state, pending-account screen, authenticated redirect, unauthenticated redirect
+3. **Login "Esqueci senha"** — implemented forgot-password modal with Supabase `resetPasswordForEmail()`, success confirmation state, and proper redirect to `/` on login so pending-account check in index.tsx runs correctly
+4. **Register vehicle_type** — fixed: `vehicle_type: veiculo` is now saved to the `drivers` table on registration
+5. **Profile account status** — replaced hardcoded "Conta verificada" with `AccountStatusRow` component that reads real `entregador.accountStatus` and shows appropriate color/label for `active`, `pending`, `suspended`, `rejected` states
+6. **Web tab bar height** — updated from 70px to 84px (50px tab bar + 34px safe-area bottom inset) per Expo guidelines
+7. **expo-notifications projectId** — `getExpoPushTokenAsync()` now reads `projectId` from `Constants.expoConfig.extra.eas.projectId` to avoid token-registration failures in production builds
+8. **expo-av migration** — `soundService.ts` migrated from deprecated `expo-av` to `expo-audio` (`AudioPlayer`), eliminating SDK 54 deprecation warning

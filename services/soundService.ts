@@ -1,14 +1,14 @@
-import { Audio } from 'expo-av';
 import { Platform, Vibration } from 'react-native';
 
-let soundObject: Audio.Sound | null = null;
+let currentPlayer: any = null;
 
 /**
  * Play alert sound + vibration when a new order arrives.
- * Uses expo-av for audio and React Native Vibration for haptics.
+ * Uses expo-audio for audio and React Native Vibration for haptics.
+ * Falls back gracefully on web (no vibration/audio APIs).
  */
 export async function playNewOrderAlert(): Promise<void> {
-  // Always vibrate — it works regardless of sound file
+  // Vibrate on native only
   try {
     if (Platform.OS === 'android') {
       Vibration.vibrate([0, 500, 150, 300, 100, 500]);
@@ -17,33 +17,33 @@ export async function playNewOrderAlert(): Promise<void> {
     }
   } catch (_) {}
 
-  // Try to play sound
-  try {
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-      shouldDuckAndroid: false,
-      playThroughEarpieceAndroid: false,
-    });
+  // Audio only on native
+  if (Platform.OS === 'web') return;
 
-    if (soundObject) {
-      await soundObject.unloadAsync().catch(() => {});
-      soundObject = null;
+  try {
+    // Dynamically import to avoid module-level side effects
+    const { AudioPlayer } = await import('expo-audio');
+
+    if (currentPlayer) {
+      try { currentPlayer.remove(); } catch (_) {}
+      currentPlayer = null;
     }
 
-    const { sound } = await Audio.Sound.createAsync(
-      { uri: 'https://cdn.freesound.org/previews/512/512136_11214653-hq.mp3' },
-      { shouldPlay: true, volume: 1.0, isLooping: false }
+    const player = new AudioPlayer(
+      { uri: 'https://cdn.freesound.org/previews/512/512136_11214653-hq.mp3' }
     );
-    soundObject = sound;
+    currentPlayer = player;
+    player.volume = 1.0;
+    player.loop = false;
+    player.play();
 
-    sound.setOnPlaybackStatusUpdate((status) => {
-      if (status.isLoaded && status.didJustFinish) {
-        sound.unloadAsync().catch(() => {});
-        soundObject = null;
+    // Auto-cleanup after 30 seconds (safety net)
+    setTimeout(() => {
+      if (currentPlayer === player) {
+        try { player.remove(); } catch (_) {}
+        currentPlayer = null;
       }
-    });
+    }, 30_000);
   } catch (error) {
     console.warn('[Sound] Alert sound unavailable:', error);
   }
@@ -51,11 +51,13 @@ export async function playNewOrderAlert(): Promise<void> {
 
 export async function stopNewOrderAlert(): Promise<void> {
   try {
-    if (soundObject) {
-      await soundObject.stopAsync();
-      await soundObject.unloadAsync();
-      soundObject = null;
+    if (currentPlayer) {
+      currentPlayer.pause();
+      try { currentPlayer.remove(); } catch (_) {}
+      currentPlayer = null;
     }
-    Vibration.cancel();
+    if (Platform.OS !== 'web') {
+      Vibration.cancel();
+    }
   } catch (_) {}
 }

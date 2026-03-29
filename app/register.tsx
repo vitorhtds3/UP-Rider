@@ -91,11 +91,12 @@ export default function RegisterScreen() {
         console.error('Erro ao criar perfil de usuario:', userError.message);
       }
 
-      // Insert into drivers table
+      // Insert into drivers table with vehicle_type
       const { error: driverError } = await supabase
         .from('drivers')
         .insert({
           user_id: userId,
+          vehicle_type: veiculo,
           status: 'pending',
           is_online: false,
           latitude: null,
@@ -107,7 +108,7 @@ export default function RegisterScreen() {
       }
 
       setSucesso(true);
-    } catch (e) {
+    } catch {
       setErro('Erro inesperado. Tente novamente.');
     } finally {
       setIsLoading(false);
@@ -128,7 +129,11 @@ export default function RegisterScreen() {
           <MaterialIcons name="schedule" size={16} color={Colors.warning} />
           <Text style={{ fontSize: FontSize.sm, color: '#92400E' }}>O processo de aprovacao leva ate 48 horas uteis.</Text>
         </View>
-        <TouchableOpacity style={{ backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 56, alignItems: 'center', justifyContent: 'center', width: '100%' }} onPress={() => router.replace('/login')} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={{ backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 56, alignItems: 'center', justifyContent: 'center', width: '100%' }}
+          onPress={() => router.replace('/login')}
+          activeOpacity={0.85}
+        >
           <Text style={{ fontSize: FontSize.md, fontWeight: FontWeight.bold, color: '#fff', letterSpacing: 1 }}>IR PARA O LOGIN</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -164,7 +169,14 @@ export default function RegisterScreen() {
             <Text style={styles.inputLabel}>Nome completo *</Text>
             <View style={styles.inputWrapper}>
               <MaterialIcons name="person" size={20} color={Colors.textSubtle} style={styles.inputIcon} />
-              <TextInput style={styles.input} value={nome} onChangeText={setNome} placeholder="Seu nome completo" placeholderTextColor={Colors.textSubtle} accessibilityLabel="Nome completo" />
+              <TextInput
+                style={styles.input}
+                value={nome}
+                onChangeText={setNome}
+                placeholder="Seu nome completo"
+                placeholderTextColor={Colors.textSubtle}
+                accessibilityLabel="Nome completo"
+              />
             </View>
           </View>
 
@@ -172,7 +184,16 @@ export default function RegisterScreen() {
             <Text style={styles.inputLabel}>Email *</Text>
             <View style={styles.inputWrapper}>
               <MaterialIcons name="email" size={20} color={Colors.textSubtle} style={styles.inputIcon} />
-              <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="seu@email.com" placeholderTextColor={Colors.textSubtle} keyboardType="email-address" autoCapitalize="none" accessibilityLabel="Email" />
+              <TextInput
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="seu@email.com"
+                placeholderTextColor={Colors.textSubtle}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                accessibilityLabel="Email"
+              />
             </View>
           </View>
 
@@ -180,7 +201,15 @@ export default function RegisterScreen() {
             <Text style={styles.inputLabel}>Telefone com DDD *</Text>
             <View style={styles.inputWrapper}>
               <MaterialIcons name="phone" size={20} color={Colors.textSubtle} style={styles.inputIcon} />
-              <TextInput style={styles.input} value={telefone} onChangeText={(v) => setTelefone(formatPhone(v))} placeholder="(11) 99999-9999" placeholderTextColor={Colors.textSubtle} keyboardType="phone-pad" accessibilityLabel="Telefone" />
+              <TextInput
+                style={styles.input}
+                value={telefone}
+                onChangeText={(v) => setTelefone(formatPhone(v))}
+                placeholder="(11) 99999-9999"
+                placeholderTextColor={Colors.textSubtle}
+                keyboardType="phone-pad"
+                accessibilityLabel="Telefone"
+              />
             </View>
           </View>
 
@@ -223,7 +252,15 @@ export default function RegisterScreen() {
             <Text style={styles.inputLabel}>Senha *</Text>
             <View style={styles.inputWrapper}>
               <MaterialIcons name="lock" size={20} color={Colors.textSubtle} style={styles.inputIcon} />
-              <TextInput style={styles.input} value={senha} onChangeText={setSenha} placeholder="Minimo 6 caracteres" placeholderTextColor={Colors.textSubtle} secureTextEntry={!senhaVisivel} accessibilityLabel="Senha" />
+              <TextInput
+                style={styles.input}
+                value={senha}
+                onChangeText={setSenha}
+                placeholder="Minimo 6 caracteres"
+                placeholderTextColor={Colors.textSubtle}
+                secureTextEntry={!senhaVisivel}
+                accessibilityLabel="Senha"
+              />
               <TouchableOpacity onPress={() => setSenhaVisivel(!senhaVisivel)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <MaterialIcons name={senhaVisivel ? 'visibility-off' : 'visibility'} size={20} color={Colors.textSubtle} />
               </TouchableOpacity>
@@ -259,7 +296,15 @@ export default function RegisterScreen() {
               },
             ]}>
               <MaterialIcons name="lock-outline" size={20} color={Colors.textSubtle} style={styles.inputIcon} />
-              <TextInput style={styles.input} value={confirmarSenha} onChangeText={setConfirmarSenha} placeholder="Repita a senha" placeholderTextColor={Colors.textSubtle} secureTextEntry={!confirmarVisivel} accessibilityLabel="Confirmar senha" />
+              <TextInput
+                style={styles.input}
+                value={confirmarSenha}
+                onChangeText={setConfirmarSenha}
+                placeholder="Repita a senha"
+                placeholderTextColor={Colors.textSubtle}
+                secureTextEntry={!confirmarVisivel}
+                accessibilityLabel="Confirmar senha"
+              />
               <TouchableOpacity onPress={() => setConfirmarVisivel(!confirmarVisivel)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <MaterialIcons name={confirmarVisivel ? 'visibility-off' : 'visibility'} size={20} color={Colors.textSubtle} />
               </TouchableOpacity>
@@ -276,7 +321,7 @@ export default function RegisterScreen() {
 
           {/* Botao */}
           <TouchableOpacity
-            style={{ backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 56, alignItems: 'center', justifyContent: 'center', shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6, marginBottom: Spacing.md }}
+            style={styles.btnPrimary}
             onPress={handleRegister}
             disabled={isLoading}
             activeOpacity={0.85}
@@ -284,7 +329,7 @@ export default function RegisterScreen() {
             {isLoading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={{ fontSize: FontSize.md, fontWeight: FontWeight.bold, color: '#fff', letterSpacing: 1 }}>CRIAR CONTA</Text>
+              <Text style={styles.btnPrimaryText}>CRIAR CONTA</Text>
             )}
           </TouchableOpacity>
 
@@ -327,4 +372,6 @@ const styles = StyleSheet.create({
   strengthLabel: { fontSize: FontSize.xs, color: Colors.textSubtle, width: 40, textAlign: 'right' },
   erroBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.errorLight, borderRadius: Radius.sm, padding: Spacing.sm, marginBottom: Spacing.sm, gap: 6 },
   erroText: { fontSize: FontSize.sm, color: Colors.error, flex: 1 },
+  btnPrimary: { backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 56, alignItems: 'center', justifyContent: 'center', shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6, marginBottom: Spacing.md },
+  btnPrimaryText: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: '#fff', letterSpacing: 1 },
 });
