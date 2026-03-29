@@ -120,23 +120,14 @@ export default function RegisterScreen() {
         }
       }
 
-      // Create driver profile — status: 'pending' awaits admin approval
-      // vehicle_type column does not exist in the DB schema; stored in auth metadata instead
-      const driverInsertFields: Record<string, any> = {
-        user_id: userId,
-        is_online: false,
-        status: 'pending',
-      };
-
-      const { error: driverError } = await supabase
-        .from('drivers')
-        .insert(driverInsertFields);
+      // Create driver profile via RPC function (bypasses RLS that blocks direct INSERT)
+      const { error: driverError } = await supabase.rpc('create_driver_profile', {
+        p_user_id: userId,
+        p_status: 'pending',
+      });
 
       if (driverError) {
-        // Row may already exist — try upsert
-        await supabase
-          .from('drivers')
-          .upsert({ ...driverInsertFields }, { onConflict: 'user_id' });
+        console.warn('[Register] drivers profile creation failed:', driverError.message);
       }
 
       setSucesso(true);
