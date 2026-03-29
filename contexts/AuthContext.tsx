@@ -29,6 +29,7 @@ interface AuthContextType {
   login: (email: string, senha: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   updateEntregador: (data: Partial<Entregador>) => void;
+  refreshUserData: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -95,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: authResp?.user?.email || '',
             phone: meta.phone || '',
             role: meta.role || 'driver',
-            status: meta.status || 'active',
+            status: meta.status || 'pending',
           };
         }
       }
@@ -207,6 +208,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: true };
   };
 
+  const refreshUserData = async () => {
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+    if (currentSession?.user?.id) {
+      await fetchEntregadorData(currentSession.user.id);
+    }
+  };
+
   const logout = async () => {
     // Remove push token on logout
     if (entregador?.user_id) {
@@ -298,7 +306,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAuthenticated = !!session && !!entregador;
 
   return (
-    <AuthContext.Provider value={{ entregador, session, isAuthenticated, isLoading, login, logout, updateEntregador }}>
+    <AuthContext.Provider value={{ entregador, session, isAuthenticated, isLoading, login, logout, updateEntregador, refreshUserData }}>
       {children}
     </AuthContext.Provider>
   );

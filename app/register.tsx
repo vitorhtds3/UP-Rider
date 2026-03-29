@@ -67,7 +67,7 @@ export default function RegisterScreen() {
             phone: cleanPhone,
             role: 'driver',
             vehicle: veiculo,
-            status: 'active',
+            status: 'pending',
           },
         },
       });
@@ -99,7 +99,7 @@ export default function RegisterScreen() {
           name: nome.trim(),
           phone: cleanPhone,
           role: 'driver',
-          status: 'active',
+          status: 'pending',
         })
         .eq('id', userId);
 
@@ -113,7 +113,7 @@ export default function RegisterScreen() {
             email: cleanEmail,
             phone: cleanPhone,
             role: 'driver',
-            status: 'active',
+            status: 'pending',
           });
         if (insertError) {
           console.warn('[Register] users table setup failed (data saved in auth metadata):', insertError.message);
