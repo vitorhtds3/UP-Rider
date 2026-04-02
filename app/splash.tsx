@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase } from '@/services/supabase';
 import { Colors, FontSize, FontWeight } from '@/constants/theme';
 
 export default function SplashScreen() {
@@ -11,81 +10,63 @@ export default function SplashScreen() {
   const opacityAnim = useRef(new Animated.Value(0)).current;
   const textOpacity = useRef(new Animated.Value(0)).current;
   const textTranslateY = useRef(new Animated.Value(16)).current;
-  const containerOpacity = useRef(new Animated.Value(1)).current;
+  const bgScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    let isMounted = true;
-
-    // Run auth check and animation in parallel
-    // Animation takes exactly ~4000ms total
-    const animationPromise = new Promise<void>((resolve) => {
-      Animated.sequence([
-        // Logo appears (0–700ms)
-        Animated.parallel([
-          Animated.spring(scaleAnim, {
-            toValue: 1,
-            tension: 60,
-            friction: 7,
-            useNativeDriver: true,
-          }),
-          Animated.timing(opacityAnim, {
-            toValue: 1,
-            duration: 400,
-            useNativeDriver: true,
-          }),
-        ]),
-        // Text appears (700–1050ms)
-        Animated.parallel([
-          Animated.timing(textOpacity, {
-            toValue: 1,
-            duration: 350,
-            useNativeDriver: true,
-          }),
-          Animated.timing(textTranslateY, {
-            toValue: 0,
-            duration: 350,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-        ]),
-        // Hold (1050–3600ms)
-        Animated.delay(2550),
-        // Fade everything out (3600–4000ms)
-        Animated.timing(containerOpacity, {
-          toValue: 0,
+    Animated.sequence([
+      Animated.parallel([
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          tension: 60,
+          friction: 7,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacityAnim, {
+          toValue: 1,
           duration: 400,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.parallel([
+        Animated.timing(textOpacity, {
+          toValue: 1,
+          duration: 350,
+          useNativeDriver: true,
+        }),
+        Animated.timing(textTranslateY, {
+          toValue: 0,
+          duration: 350,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.delay(900),
+      Animated.parallel([
+        Animated.timing(bgScale, {
+          toValue: 1.15,
+          duration: 350,
           easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
         }),
-      ]).start(() => resolve());
+        Animated.timing(opacityAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(textOpacity, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start(() => {
+      router.replace('/login');
     });
-
-    const authPromise = supabase.auth.getSession().then(({ data: { session } }) => {
-      return !!session;
-    }).catch(() => false);
-
-    Promise.all([animationPromise, authPromise]).then(([, isLoggedIn]) => {
-      if (!isMounted) return;
-      if (isLoggedIn) {
-        router.replace('/');
-      } else {
-        router.replace('/login');
-      }
-    });
-
-    return () => {
-      isMounted = false;
-    };
   }, []);
 
   return (
-    <Animated.View style={[styles.container, { opacity: containerOpacity }]}>
-      <Animated.View
-        style={[
-          styles.logoWrapper,
-          { opacity: opacityAnim, transform: [{ scale: scaleAnim }] },
-        ]}
-      >
+    <Animated.View style={[styles.container, { transform: [{ scale: bgScale }] }]}>
+      <Animated.View style={[styles.logoWrapper, { opacity: opacityAnim, transform: [{ scale: scaleAnim }] }]}>
         <View style={styles.logoBox}>
           <Text style={styles.logoU}>U</Text>
           <View style={styles.logoP}>
@@ -95,14 +76,7 @@ export default function SplashScreen() {
         </View>
       </Animated.View>
 
-      <Animated.View
-        style={{
-          opacity: textOpacity,
-          transform: [{ translateY: textTranslateY }],
-          alignItems: 'center',
-          marginTop: 24,
-        }}
-      >
+      <Animated.View style={{ opacity: textOpacity, transform: [{ translateY: textTranslateY }], alignItems: 'center', marginTop: 24 }}>
         <Text style={styles.appName}>UP Rider</Text>
         <Text style={styles.tagline}>O app dos entregadores parceiros</Text>
       </Animated.View>

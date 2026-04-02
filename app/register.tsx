@@ -54,30 +54,16 @@ export default function RegisterScreen() {
 
     setIsLoading(true);
     try {
-      const cleanEmail = email.trim().toLowerCase();
-      const cleanPhone = telefone.replace(/\D/g, '');
-
-      // Store all important data in auth metadata as a reliable fallback
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: cleanEmail,
+        email: email.trim().toLowerCase(),
         password: senha,
         options: {
-          data: {
-            name: nome.trim(),
-            phone: cleanPhone,
-            role: 'driver',
-            vehicle: veiculo,
-            status: 'pending',
-          },
+          data: { name: nome.trim() },
         },
       });
 
       if (authError) {
-        if (authError.message.toLowerCase().includes('already registered')) {
-          setErro('Este email ja esta cadastrado. Use outro email ou faca login.');
-        } else {
-          setErro(authError.message);
-        }
+        setErro(authError.message);
         setIsLoading(false);
         return;
       }
@@ -89,26 +75,39 @@ export default function RegisterScreen() {
         return;
       }
 
-      // Create only the drivers row (Auth already has all user info in metadata)
-      // Try direct INSERT first (works after signUp since user is authenticated)
-      const { error: insertErr } = await supabase
-        .from('drivers')
-        .insert({ user_id: userId, status: 'pending', is_online: false });
-
-      if (insertErr) {
-        // Fallback: SECURITY DEFINER RPC that only creates the drivers row
-        const { error: rpcError } = await supabase.rpc('create_driver_row', {
-          p_user_id: userId,
+      // Insert into public.users with role = 'driver'
+      const { error: userError } = await supabase
+        .from('users')
+        .insert({
+          id: userId,
+          name: nome.trim(),
+          email: email.trim().toLowerCase(),
+          phone: telefone.replace(/\D/g, ''),
+          role: 'driver',
+          status: 'pending',
         });
-        if (rpcError) {
-          console.warn('[Register] create_driver_row RPC failed:', rpcError.message);
-          // Auth metadata still saved — admin can create drivers row manually
-        }
+
+      if (userError) {
+        console.error('Erro ao criar perfil de usuario:', userError.message);
+      }
+
+      // Insert into drivers table
+      const { error: driverError } = await supabase
+        .from('drivers')
+        .insert({
+          user_id: userId,
+          status: 'pending',
+          is_online: false,
+          latitude: null,
+          longitude: null,
+        });
+
+      if (driverError) {
+        console.error('Erro ao criar perfil de motorista:', driverError.message);
       }
 
       setSucesso(true);
     } catch (e) {
-      console.error('[Register] unexpected error:', e);
       setErro('Erro inesperado. Tente novamente.');
     } finally {
       setIsLoading(false);
@@ -129,11 +128,7 @@ export default function RegisterScreen() {
           <MaterialIcons name="schedule" size={16} color={Colors.warning} />
           <Text style={{ fontSize: FontSize.sm, color: '#92400E' }}>O processo de aprovacao leva ate 48 horas uteis.</Text>
         </View>
-        <TouchableOpacity
-          style={{ backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 56, alignItems: 'center', justifyContent: 'center', width: '100%' }}
-          onPress={() => router.replace('/login')}
-          activeOpacity={0.85}
-        >
+        <TouchableOpacity style={{ backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 56, alignItems: 'center', justifyContent: 'center', width: '100%' }} onPress={() => router.replace('/login')} activeOpacity={0.85}>
           <Text style={{ fontSize: FontSize.md, fontWeight: FontWeight.bold, color: '#fff', letterSpacing: 1 }}>IR PARA O LOGIN</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -169,14 +164,7 @@ export default function RegisterScreen() {
             <Text style={styles.inputLabel}>Nome completo *</Text>
             <View style={styles.inputWrapper}>
               <MaterialIcons name="person" size={20} color={Colors.textSubtle} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                value={nome}
-                onChangeText={setNome}
-                placeholder="Seu nome completo"
-                placeholderTextColor={Colors.textSubtle}
-                accessibilityLabel="Nome completo"
-              />
+              <TextInput style={styles.input} value={nome} onChangeText={setNome} placeholder="Seu nome completo" placeholderTextColor={Colors.textSubtle} accessibilityLabel="Nome completo" />
             </View>
           </View>
 
@@ -184,16 +172,7 @@ export default function RegisterScreen() {
             <Text style={styles.inputLabel}>Email *</Text>
             <View style={styles.inputWrapper}>
               <MaterialIcons name="email" size={20} color={Colors.textSubtle} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="seu@email.com"
-                placeholderTextColor={Colors.textSubtle}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                accessibilityLabel="Email"
-              />
+              <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="seu@email.com" placeholderTextColor={Colors.textSubtle} keyboardType="email-address" autoCapitalize="none" accessibilityLabel="Email" />
             </View>
           </View>
 
@@ -201,15 +180,7 @@ export default function RegisterScreen() {
             <Text style={styles.inputLabel}>Telefone com DDD *</Text>
             <View style={styles.inputWrapper}>
               <MaterialIcons name="phone" size={20} color={Colors.textSubtle} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                value={telefone}
-                onChangeText={(v) => setTelefone(formatPhone(v))}
-                placeholder="(11) 99999-9999"
-                placeholderTextColor={Colors.textSubtle}
-                keyboardType="phone-pad"
-                accessibilityLabel="Telefone"
-              />
+              <TextInput style={styles.input} value={telefone} onChangeText={(v) => setTelefone(formatPhone(v))} placeholder="(11) 99999-9999" placeholderTextColor={Colors.textSubtle} keyboardType="phone-pad" accessibilityLabel="Telefone" />
             </View>
           </View>
 
@@ -252,15 +223,7 @@ export default function RegisterScreen() {
             <Text style={styles.inputLabel}>Senha *</Text>
             <View style={styles.inputWrapper}>
               <MaterialIcons name="lock" size={20} color={Colors.textSubtle} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                value={senha}
-                onChangeText={setSenha}
-                placeholder="Minimo 6 caracteres"
-                placeholderTextColor={Colors.textSubtle}
-                secureTextEntry={!senhaVisivel}
-                accessibilityLabel="Senha"
-              />
+              <TextInput style={styles.input} value={senha} onChangeText={setSenha} placeholder="Minimo 6 caracteres" placeholderTextColor={Colors.textSubtle} secureTextEntry={!senhaVisivel} accessibilityLabel="Senha" />
               <TouchableOpacity onPress={() => setSenhaVisivel(!senhaVisivel)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <MaterialIcons name={senhaVisivel ? 'visibility-off' : 'visibility'} size={20} color={Colors.textSubtle} />
               </TouchableOpacity>
@@ -296,15 +259,7 @@ export default function RegisterScreen() {
               },
             ]}>
               <MaterialIcons name="lock-outline" size={20} color={Colors.textSubtle} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                value={confirmarSenha}
-                onChangeText={setConfirmarSenha}
-                placeholder="Repita a senha"
-                placeholderTextColor={Colors.textSubtle}
-                secureTextEntry={!confirmarVisivel}
-                accessibilityLabel="Confirmar senha"
-              />
+              <TextInput style={styles.input} value={confirmarSenha} onChangeText={setConfirmarSenha} placeholder="Repita a senha" placeholderTextColor={Colors.textSubtle} secureTextEntry={!confirmarVisivel} accessibilityLabel="Confirmar senha" />
               <TouchableOpacity onPress={() => setConfirmarVisivel(!confirmarVisivel)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <MaterialIcons name={confirmarVisivel ? 'visibility-off' : 'visibility'} size={20} color={Colors.textSubtle} />
               </TouchableOpacity>
@@ -321,7 +276,7 @@ export default function RegisterScreen() {
 
           {/* Botao */}
           <TouchableOpacity
-            style={styles.btnPrimary}
+            style={{ backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 56, alignItems: 'center', justifyContent: 'center', shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6, marginBottom: Spacing.md }}
             onPress={handleRegister}
             disabled={isLoading}
             activeOpacity={0.85}
@@ -329,7 +284,7 @@ export default function RegisterScreen() {
             {isLoading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.btnPrimaryText}>CRIAR CONTA</Text>
+              <Text style={{ fontSize: FontSize.md, fontWeight: FontWeight.bold, color: '#fff', letterSpacing: 1 }}>CRIAR CONTA</Text>
             )}
           </TouchableOpacity>
 
@@ -372,6 +327,4 @@ const styles = StyleSheet.create({
   strengthLabel: { fontSize: FontSize.xs, color: Colors.textSubtle, width: 40, textAlign: 'right' },
   erroBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.errorLight, borderRadius: Radius.sm, padding: Spacing.sm, marginBottom: Spacing.sm, gap: 6 },
   erroText: { fontSize: FontSize.sm, color: Colors.error, flex: 1 },
-  btnPrimary: { backgroundColor: Colors.primary, borderRadius: Radius.lg, height: 56, alignItems: 'center', justifyContent: 'center', shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6, marginBottom: Spacing.md },
-  btnPrimaryText: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: '#fff', letterSpacing: 1 },
 });

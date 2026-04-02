@@ -21,6 +21,8 @@ export interface Pedido {
   longitude_coleta?: number;
   latitude_entrega?: number;
   longitude_entrega?: number;
+  payment_method?: string;
+  notes?: string;
 }
 
 export interface HistoricoEntrega {
@@ -35,19 +37,17 @@ export interface HistoricoEntrega {
 type DeliveryStatus = 'indo_buscar' | 'coletado' | 'a_caminho' | 'entregue';
 
 interface DeliveryContextType {
-  pedidoAtual: Pedido | null;
-  totalDisponiveis: number;
+  pedidosDisponiveis: Pedido[];
   pedidoAtivo: Pedido | null;
   deliveryStatus: DeliveryStatus;
   historico: HistoricoEntrega[];
   ganhosDia: number;
   ganhosSemana: number;
-  entregasHoje: number;
   isLoadingOrders: boolean;
-  aceitarPedido: (pedidoId: string) => Promise<boolean>;
+  aceitarPedido: (pedidoId: string) => Promise<void>;
   recusarPedido: (pedidoId: string) => void;
   avancarStatus: () => void;
-  finalizarEntrega: () => Promise<boolean>;
+  finalizarEntrega: () => Promise<void>;
   refreshOrders: () => Promise<void>;
 }
 
@@ -61,57 +61,82 @@ const APP_STATUS_MAP: Record<string, string> = {
   delivered: 'entregue',
 };
 
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+// Geocode an address string → lat/lng using OpenStreetMap Nominatim (free, no key)
+async function geocodeAddress(address: string): Promise<{ latitude: number; longitude: number } | null> {
+  try {
+    if (!address || address === 'Endereco de entrega') return null;
+    const encoded = encodeURIComponent(address);
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&limit=1`,
+      { headers: { 'Accept-Language': 'pt-BR', 'User-Agent': 'UPRiderApp/1.0' } }
+    );
+    const data = await res.json();
+    if (data && data.length > 0) {
+      return { latitude: parseFloat(data[0].lat), longitude: parseFloat(data[0].lon) };
+    }
+  } catch (_) {}
+  return null;
 }
 
-function formatDistancia(km: number): string {
-  if (km < 1) return `${Math.round(km * 1000)} m`;
-  return `${km.toFixed(1).replace('.', ',')} km`;
-}
+// Map a raw DB order row to our Pedido interface
+async function mapOrderToPedido(o: any, idx: number): Promise<Pedido> {
+  const restaurantLat = o.restaurants?.latitude ? Number(o.restaurants.latitude) : undefined;
+  const restaurantLng = o.restaurants?.longitude ? Number(o.restaurants.longitude) : undefined;
 
-function mapOrder(o: any, idx = 0): Pedido {
-  const latColeta = o.restaurants?.latitude ? Number(o.restaurants.latitude) : undefined;
-  const lngColeta = o.restaurants?.longitude ? Number(o.restaurants.longitude) : undefined;
-  const latEntrega = Number(o.latitude_delivery ?? o.delivery_latitude ?? o.lat_entrega ?? 0) || undefined;
-  const lngEntrega = Number(o.longitude_delivery ?? o.delivery_longitude ?? o.lon_entrega ?? 0) || undefined;
+  // Try to geocode delivery address if no coords stored
+  let deliveryLat: number | undefined;
+  let deliveryLng: number | undefined;
 
-  let distancia = `${(1.5 + idx * 0.8).toFixed(1).replace('.', ',')} km`;
-  if (latColeta && lngColeta && latEntrega && lngEntrega) {
-    distancia = formatDistancia(haversineKm(latColeta, lngColeta, latEntrega, lngEntrega));
+  const deliveryAddr: string = o.delivery_address || '';
+  if (deliveryAddr && deliveryAddr.length > 5) {
+    const geo = await geocodeAddress(deliveryAddr);
+    if (geo) {
+      deliveryLat = geo.latitude;
+      deliveryLng = geo.longitude;
+    }
   }
+
+  // Fallback: offset from restaurant if geocode failed
+  if (!deliveryLat && restaurantLat) {
+    deliveryLat = restaurantLat - 0.012 + idx * 0.003;
+    deliveryLng = (restaurantLng ?? 0) + 0.015 + idx * 0.004;
+  }
+
+  // Calculate distance if both coords available
+  let distStr = `${(1.5 + idx * 0.8).toFixed(1).replace('.', ',')} km`;
+  if (restaurantLat && restaurantLng && deliveryLat && deliveryLng) {
+    const R = 6371;
+    const dLat = ((deliveryLat - restaurantLat) * Math.PI) / 180;
+    const dLon = ((deliveryLng - restaurantLng) * Math.PI) / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos((restaurantLat * Math.PI) / 180) * Math.cos((deliveryLat * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+    const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    distStr = dist < 1 ? `${Math.round(dist * 1000)} m` : `${dist.toFixed(1).replace('.', ',')} km`;
+  }
+
+  const distNum = parseFloat(distStr.replace(',', '.').replace(' km', '').replace(' m', '')) || 2;
+  const timeMin = Math.max(10, Math.round(distNum * 4));
 
   return {
     id: o.id,
     restaurante_nome: o.restaurants?.name || 'Restaurante',
     restaurante_id: o.restaurant_id,
-    cliente_nome: o.client_name || o.customer_name || o.nome_cliente
-      || (o.client_id ? `Cliente #${String(o.client_id).slice(0, 6)}` : 'Cliente'),
+    cliente_nome: 'Cliente',
     endereco_coleta: o.restaurants?.address || 'Endereco do restaurante',
-    endereco_entrega: o.delivery_address || o.address_delivery || o.endereco_entrega
-      || o.delivery_location || o.drop_off_address || 'Endereco de entrega',
+    endereco_entrega: o.delivery_address || 'Endereco de entrega',
     valor_entrega: Number(o.delivery_fee) || Number(o.total) * 0.15 || 8.50,
-    distancia,
-    tempo_estimado: `${15 + idx * 5} min`,
+    distancia: distStr,
+    tempo_estimado: `${timeMin} min`,
     status: 'disponivel',
     data: o.created_at,
-    latitude_coleta: latColeta,
-    longitude_coleta: lngColeta,
-    latitude_entrega: latEntrega,
-    longitude_entrega: lngEntrega,
+    latitude_coleta: restaurantLat,
+    longitude_coleta: restaurantLng,
+    latitude_entrega: deliveryLat,
+    longitude_entrega: deliveryLng,
+    payment_method: o.payment_method,
+    notes: o.notes,
   };
 }
-
-// How long (ms) before a refused order cycles back into the queue
-const RECYCLE_DELAY_MS = 45_000;
-// How long (ms) before re-fetching when we have 0 orders (polling fallback)
-const EMPTY_POLL_MS = 20_000;
 
 export function DeliveryProvider({ children }: { children: ReactNode }) {
   const { entregador } = useAuth();
@@ -121,79 +146,106 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
   const [historico, setHistorico] = useState<HistoricoEntrega[]>([]);
   const [ganhosDia, setGanhosDia] = useState(0);
   const [ganhosSemana, setGanhosSemana] = useState(0);
-  const [entregasHoje, setEntregasHoje] = useState(0);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  const knownOrderIds = useRef<Set<string>>(new Set());
 
-  // The single current order exposed to the UI (first in queue)
-  const pedidoAtual = pedidos.length > 0 ? pedidos[0] : null;
-  const totalDisponiveis = pedidos.length;
-
-  // Track the last order ID we played sound for — avoid duplicate alerts
-  const lastAlertedOrderId = useRef<string | null>(null);
-  const emptyPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pedidosDisponiveis = pedidos.filter(p => p.status === 'disponivel');
 
   const fetchOrders = useCallback(async () => {
-    if (!entregador?.user_id) return;
     setIsLoadingOrders(true);
     try {
-      // 1. SECURITY DEFINER RPC — bypasses RLS, no status filter at all
-      let ordersData: any[] | null = null;
-      const { data: rpcOrders, error: rpcErr } = await supabase.rpc('get_available_orders');
-      if (!rpcErr && Array.isArray(rpcOrders)) {
-        ordersData = rpcOrders;
-        console.log('[Delivery] Pedidos disponiveis:', rpcOrders.length);
-      } else {
-        if (rpcErr) console.warn('[Delivery] RPC get_available_orders falhou:', rpcErr.message);
-        // 2. Fallback: direct query — driver_id IS NULL, any status except final
-        const { data: direct, error: directErr } = await supabase
-          .from('orders')
-          .select('*, restaurants(name, address, latitude, longitude)')
-          .is('driver_id', null)
-          .not('status', 'in', '("delivered","cancelled")')
-          .order('created_at', { ascending: true });
-        if (directErr) {
-          console.warn('[Delivery] Direct query falhou:', directErr.message);
-          // 3. Last resort: fetch ALL orders with null driver_id regardless of status
-          const { data: any_orders } = await supabase
-            .from('orders')
-            .select('*, restaurants(name, address, latitude, longitude)')
-            .is('driver_id', null)
-            .order('created_at', { ascending: true });
-          ordersData = any_orders || [];
-        } else {
-          ordersData = direct || [];
-        }
-      }
-
-      if (ordersData !== null) {
-        setPedidos(ordersData.map((o: any, idx: number) => mapOrder(o, idx)));
-      }
-
-      // Fetch active order for this driver (driver_id FK = drivers.id, not user_id)
-      const activeDriverId = entregador.driver_id || entregador.user_id;
-      const { data: activeOrder } = await supabase
+      // Fetch available orders
+      const { data: ordersData, error } = await supabase
         .from('orders')
-        .select('*, restaurants(name, address, latitude, longitude)')
-        .eq('driver_id', activeDriverId)
-        .in('status', ['preparing', 'ready', 'delivering'])
-        .maybeSingle();
+        .select(`
+          id,
+          client_id,
+          restaurant_id,
+          driver_id,
+          status,
+          total,
+          delivery_fee,
+          delivery_address,
+          payment_method,
+          notes,
+          created_at,
+          restaurants (
+            name,
+            address,
+            latitude,
+            longitude
+          )
+        `)
+        .eq('status', 'pending')
+        .is('driver_id', null)
+        .order('created_at', { ascending: false })
+        .limit(20);
 
-      if (activeOrder) {
-        const appStatus = APP_STATUS_MAP[activeOrder.status] || 'em_andamento';
-        const mapped = mapOrder(activeOrder);
-        setPedidoAtivo({
-          ...mapped,
-          status: appStatus as Pedido['status'],
-          entregador_id: entregador.user_id,
-        });
-        const statusMapping: Record<string, DeliveryStatus> = {
-          preparing: 'indo_buscar',
-          ready: 'coletado',
-          delivering: 'a_caminho',
-        };
-        setDeliveryStatus(statusMapping[activeOrder.status] || 'indo_buscar');
+      if (error) {
+        console.error('Erro ao buscar pedidos:', error);
       } else {
-        setPedidoAtivo(null);
+        // Map orders (with geocoding for delivery addresses)
+        const mapped: Pedido[] = await Promise.all(
+          (ordersData || []).map((o: any, idx: number) => mapOrderToPedido(o, idx))
+        );
+        setPedidos(mapped);
+
+        // Notify about genuinely new orders
+        if (knownOrderIds.current.size > 0) {
+          const newOnes = mapped.filter(p => !knownOrderIds.current.has(p.id));
+          if (newOnes.length > 0) {
+            playNewOrderAlert();
+            showLocalNotification(
+              'Novo pedido disponivel!',
+              `${newOnes[0].restaurante_nome} — R$ ${newOnes[0].valor_entrega.toFixed(2).replace('.', ',')} — ${newOnes[0].distancia}`
+            );
+          }
+        }
+        knownOrderIds.current = new Set(mapped.map(p => p.id));
+      }
+
+      // Fetch active order for this driver
+      if (entregador?.user_id) {
+        const { data: activeOrder } = await supabase
+          .from('orders')
+          .select(`
+            id,
+            client_id,
+            restaurant_id,
+            driver_id,
+            status,
+            total,
+            delivery_fee,
+            delivery_address,
+            payment_method,
+            notes,
+            created_at,
+            restaurants (
+              name,
+              address,
+              latitude,
+              longitude
+            )
+          `)
+          .eq('driver_id', entregador.user_id)
+          .in('status', ['preparing', 'ready', 'delivering'])
+          .maybeSingle();
+
+        if (activeOrder) {
+          const mapped = await mapOrderToPedido(activeOrder, 0);
+          mapped.status = 'em_andamento';
+          mapped.entregador_id = entregador.user_id;
+          setPedidoAtivo(mapped);
+
+          const statusMapping: Record<string, DeliveryStatus> = {
+            preparing: 'indo_buscar',
+            ready: 'coletado',
+            delivering: 'a_caminho',
+          };
+          setDeliveryStatus(statusMapping[activeOrder.status] || 'indo_buscar');
+        } else {
+          setPedidoAtivo(null);
+        }
       }
     } finally {
       setIsLoadingOrders(false);
@@ -206,42 +258,37 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
 
-    const histDriverId = entregador.driver_id || entregador.user_id;
     const { data } = await supabase
       .from('orders')
-      .select(`id, total, delivery_fee, created_at, restaurants (name)`)
-      .eq('driver_id', histDriverId)
+      .select(`
+        id,
+        total,
+        delivery_fee,
+        created_at,
+        restaurants (name)
+      `)
+      .eq('driver_id', entregador.user_id)
       .eq('status', 'delivered')
       .gte('created_at', weekAgo.toISOString())
       .order('created_at', { ascending: false });
 
     if (data) {
-      const seen = new Set<string>();
-      const hist: HistoricoEntrega[] = data
-        .filter((o: any) => {
-          if (seen.has(o.id)) return false;
-          seen.add(o.id);
-          return true;
-        })
-        .map((o: any) => ({
-          id: o.id,
-          restaurante_nome: o.restaurants?.name || 'Restaurante',
-          data: o.created_at.split('T')[0],
-          valor: Number(o.delivery_fee) || Number(o.total) * 0.15 || 8.50,
-          distancia: '2,5 km',
-          status: 'entregue' as const,
-        }));
+      const hist: HistoricoEntrega[] = data.map((o: any) => ({
+        id: o.id,
+        restaurante_nome: o.restaurants?.name || 'Restaurante',
+        data: o.created_at.split('T')[0],
+        valor: Number(o.delivery_fee) || Number(o.total) * 0.15 || 8.50,
+        distancia: '2,5 km',
+        status: 'entregue',
+      }));
       setHistorico(hist);
 
       const today = new Date().toISOString().split('T')[0];
-      const historicoHoje = hist.filter(h => h.data === today);
-      setGanhosDia(historicoHoje.reduce((s, h) => s + h.valor, 0));
+      setGanhosDia(hist.filter(h => h.data === today).reduce((s, h) => s + h.valor, 0));
       setGanhosSemana(hist.reduce((s, h) => s + h.valor, 0));
-      setEntregasHoje(historicoHoje.length);
     }
   }, [entregador?.user_id]);
 
-  // Load on mount / driver change
   useEffect(() => {
     if (entregador?.user_id) {
       fetchOrders();
@@ -249,211 +296,96 @@ export function DeliveryProvider({ children }: { children: ReactNode }) {
     }
   }, [entregador?.user_id]);
 
-  // Play sound + notification when a new order becomes the current one
-  useEffect(() => {
-    if (!pedidoAtual) return;
-    if (pedidoAtual.id === lastAlertedOrderId.current) return;
-    lastAlertedOrderId.current = pedidoAtual.id;
-
-    playNewOrderAlert();
-    showLocalNotification(
-      'Novo pedido disponivel!',
-      `${pedidoAtual.restaurante_nome} — R$ ${pedidoAtual.valor_entrega.toFixed(2).replace('.', ',')} — ${pedidoAtual.distancia}`
-    );
-  }, [pedidoAtual?.id]);
-
-  // When queue is empty, poll every EMPTY_POLL_MS to catch new orders
-  useEffect(() => {
-    if (emptyPollTimer.current) {
-      clearTimeout(emptyPollTimer.current);
-      emptyPollTimer.current = null;
-    }
-    if (pedidos.length === 0 && entregador?.user_id) {
-      emptyPollTimer.current = setTimeout(() => fetchOrders(), EMPTY_POLL_MS);
-    }
-    return () => {
-      if (emptyPollTimer.current) clearTimeout(emptyPollTimer.current);
-    };
-  }, [pedidos.length, entregador?.user_id]);
-
-  // Real-time subscription — refreshes the queue when any order changes
+  // Real-time subscription
   useEffect(() => {
     const channel = supabase
-      .channel('orders-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
-        () => {
-          fetchOrders();
-          fetchHistorico();
-        }
-      )
+      .channel('orders-realtime-v2')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        fetchOrders();
+        fetchHistorico();
+      })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [fetchOrders, fetchHistorico]);
 
-  const aceitarPedido = async (pedidoId: string): Promise<boolean> => {
-    if (!entregador?.user_id) return false;
+  const aceitarPedido = async (pedidoId: string) => {
+    if (!entregador?.user_id) return;
     const pedido = pedidos.find(p => p.id === pedidoId);
-    if (!pedido) return false;
+    if (!pedido) return;
 
-    // orders.driver_id is FK → drivers.id (not auth uid)
-    const driverFkId = entregador.driver_id || entregador.user_id;
-
-    // 1. Try direct UPDATE (works if RLS allows it)
-    const { data: directData, error: directErr } = await supabase
+    const { error } = await supabase
       .from('orders')
-      .update({ driver_id: driverFkId, status: 'preparing' })
-      .eq('id', pedidoId)
-      .is('driver_id', null)
-      .select('id');
+      .update({
+        driver_id: entregador.user_id,
+        status: 'preparing',
+        assigned_at: new Date().toISOString(),
+      })
+      .eq('id', pedidoId);
 
-    const directOk = !directErr && Array.isArray(directData) && directData.length > 0;
-
-    if (!directOk) {
-      console.warn('[Delivery] UPDATE aceitar falhou, tentando RPC accept_order:', directErr?.message);
-
-      // 2. Fallback: SECURITY DEFINER RPC bypasses RLS
-      const { data: rpcResult, error: rpcErr } = await supabase.rpc('accept_order', {
-        p_order_id: pedidoId,
-        p_driver_id: driverFkId,
-      });
-
-      if (rpcErr || rpcResult?.success !== true) {
-        console.error('[Delivery] Falha ao aceitar pedido:', rpcErr?.message || rpcResult?.error);
-        fetchOrders();
-        return false;
-      }
+    if (error) {
+      console.error('Erro ao aceitar pedido:', error);
+      return;
     }
 
     setPedidos(prev => prev.filter(p => p.id !== pedidoId));
-    setPedidoAtivo({ ...pedido, status: 'em_andamento', entregador_id: driverFkId });
+    setPedidoAtivo({ ...pedido, status: 'em_andamento', entregador_id: entregador.user_id });
     setDeliveryStatus('indo_buscar');
-    return true;
   };
 
   const recusarPedido = (pedidoId: string) => {
-    // Remove from the front of the local queue
     setPedidos(prev => prev.filter(p => p.id !== pedidoId));
-    // After RECYCLE_DELAY_MS, re-fetch so the refused order cycles back
-    // (if no other driver accepted it in the meantime)
-    setTimeout(() => fetchOrders(), RECYCLE_DELAY_MS);
   };
 
   const avancarStatus = async () => {
     if (!pedidoAtivo || !entregador?.user_id) return;
 
-    const nextStatus = {
-      indo_buscar: { delivery: 'coletado' as DeliveryStatus, db: 'ready' },
-      coletado: { delivery: 'a_caminho' as DeliveryStatus, db: 'delivering' },
-    } as Record<string, { delivery: DeliveryStatus; db: string }>;
+    const nextMap: Record<string, { delivery: DeliveryStatus; db: string }> = {
+      indo_buscar: { delivery: 'coletado', db: 'ready' },
+      coletado: { delivery: 'a_caminho', db: 'delivering' },
+    };
 
-    const next = nextStatus[deliveryStatus];
+    const next = nextMap[deliveryStatus];
     if (!next) return;
 
-    // Optimistic UI update
     setDeliveryStatus(next.delivery);
-
-    const driverFkId = entregador.driver_id || entregador.user_id;
-
-    // 1. Try direct UPDATE
-    const { data: directData, error: directErr } = await supabase
-      .from('orders')
-      .update({ status: next.db })
-      .eq('id', pedidoAtivo.id)
-      .eq('driver_id', driverFkId)
-      .select('id');
-
-    const directOk = !directErr && Array.isArray(directData) && directData.length > 0;
-
-    if (!directOk) {
-      console.warn('[Delivery] UPDATE avançar falhou:', directErr?.message, '— tentando RPC...');
-      const { data: rpcResult, error: rpcErr } = await supabase.rpc('advance_order_status', {
-        p_order_id: pedidoAtivo.id,
-        p_new_status: next.db,
-      });
-      // Accept both {success: true} and truthy result
-      const rpcOk = !rpcErr && (rpcResult?.success === true || rpcResult === true || rpcResult === null);
-      if (!rpcOk) {
-        console.error('[Delivery] Falha ao avançar status:', rpcErr?.message || JSON.stringify(rpcResult));
-        setDeliveryStatus(deliveryStatus); // revert UI
-      } else {
-        console.log('[Delivery] Status avançado via RPC para:', next.db);
-      }
-    } else {
-      console.log('[Delivery] Status avançado via UPDATE para:', next.db);
-    }
+    await supabase.from('orders').update({ status: next.db }).eq('id', pedidoAtivo.id);
   };
 
-  const finalizarEntrega = async (): Promise<boolean> => {
-    if (!pedidoAtivo || !entregador?.user_id) return false;
+  const finalizarEntrega = async () => {
+    if (!pedidoAtivo || !entregador?.user_id) return;
 
-    const orderId = pedidoAtivo.id;
-    // orders.driver_id FK → drivers.id (not auth uid)
-    const driverId = entregador.driver_id || entregador.user_id;
-    const earnings = pedidoAtivo.valor_entrega;
+    await supabase.from('orders').update({
+      status: 'delivered',
+      delivered_at: new Date().toISOString(),
+    }).eq('id', pedidoAtivo.id);
 
-    // 1. Try direct UPDATE (works when RLS allows driver to set 'delivered')
-    const { data: updated, error: updateErr } = await supabase
-      .from('orders')
-      .update({
-        status: 'delivered',
-        delivered_at: new Date().toISOString(),
-        driver_earnings: earnings,
-      })
-      .eq('id', orderId)
-      .eq('driver_id', driverId)
-      .in('status', ['delivering', 'ready', 'preparing'])
-      .select('id');
+    const entry: HistoricoEntrega = {
+      id: pedidoAtivo.id,
+      restaurante_nome: pedidoAtivo.restaurante_nome,
+      data: new Date().toISOString().split('T')[0],
+      valor: pedidoAtivo.valor_entrega,
+      distancia: pedidoAtivo.distancia,
+      status: 'entregue',
+    };
 
-    const directOk = !updateErr && Array.isArray(updated) && updated.length > 0;
-
-    if (!directOk) {
-      console.warn('[Delivery] UPDATE direto falhou, tentando RPC finalize_delivery:', updateErr?.message);
-
-      // 2. Fallback: SECURITY DEFINER RPC (bypasses RLS, no driver_id filter)
-      const { data: rpcResult, error: rpcErr } = await supabase.rpc('finalize_delivery', {
-        p_order_id: orderId,
-        p_earnings: earnings,
-      });
-
-      const rpcOk = !rpcErr && rpcResult?.success === true;
-      if (!rpcOk) {
-        console.error('[Delivery] Falha definitiva ao finalizar entrega:', rpcErr?.message || rpcResult?.error);
-        return false;
-      }
-    }
-
-    // 3. Record status history (best-effort — silently ignored if table/column missing)
-    supabase
-      .from('order_status_history')
-      .insert({ order_id: orderId, status: 'delivered', driver_id: driverId })
-      .then(() => {});  // ignore errors — optional audit table
-
-    // 4. Update local state only after DB success
-    setGanhosDia(prev => prev + earnings);
-    setGanhosSemana(prev => prev + earnings);
-    setEntregasHoje(prev => prev + 1);
+    setHistorico(prev => [entry, ...prev]);
+    setGanhosDia(prev => prev + pedidoAtivo.valor_entrega);
+    setGanhosSemana(prev => prev + pedidoAtivo.valor_entrega);
     setPedidoAtivo(null);
     setDeliveryStatus('indo_buscar');
-    fetchOrders();
-    fetchHistorico();
-    return true;
   };
 
   const refreshOrders = async () => { await fetchOrders(); };
 
   return (
     <DeliveryContext.Provider value={{
-      pedidoAtual,
-      totalDisponiveis,
+      pedidosDisponiveis,
       pedidoAtivo,
       deliveryStatus,
       historico,
       ganhosDia,
       ganhosSemana,
-      entregasHoje,
       isLoadingOrders,
       aceitarPedido,
       recusarPedido,

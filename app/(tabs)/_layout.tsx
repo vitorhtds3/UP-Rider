@@ -8,8 +8,8 @@ import { useNotifications } from '@/hooks/useNotifications';
 import { Colors } from '@/constants/theme';
 
 function OrdersTabIcon({ color, size }: { color: string; size: number }) {
-  const { totalDisponiveis } = useDelivery();
-  const count = totalDisponiveis;
+  const { pedidosDisponiveis } = useDelivery();
+  const count = pedidosDisponiveis.length;
   return (
     <View>
       <MaterialIcons name="receipt-long" size={size} color={color} />
@@ -59,12 +59,7 @@ const styles = StyleSheet.create({
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
-  const { isAuthenticated, isLoading } = useAuth();
-
-  // Wait for session to restore from storage before redirecting
-  // Without this check, a page refresh redirects to /login before
-  // Supabase has a chance to load the persisted session.
-  if (isLoading) return null;
+  const { isAuthenticated } = useAuth();
 
   if (!isAuthenticated) {
     return <Redirect href="/login" />;
@@ -72,25 +67,25 @@ export default function TabLayout() {
 
   const tabBarStyle = {
     height: Platform.select({
-      ios: insets.bottom + 60,
-      android: insets.bottom + 60,
-      default: 84,
+      ios: insets.bottom + 64,
+      android: insets.bottom + 64,
+      default: 72,
     }),
     paddingTop: 8,
     paddingBottom: Platform.select({
       ios: insets.bottom + 8,
       android: insets.bottom + 8,
-      default: 34,
+      default: 8,
     }),
     paddingHorizontal: 16,
-    backgroundColor: Colors.tabBar,
+    backgroundColor: '#0F1923',
     borderTopWidth: 1,
-    borderTopColor: Colors.tabBarBorder,
+    borderTopColor: 'rgba(255,255,255,0.08)',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 12,
   };
 
   return (
@@ -98,9 +93,9 @@ export default function TabLayout() {
       screenOptions={{
         headerShown: false,
         tabBarStyle,
-        tabBarActiveTintColor: Colors.tabActive,
-        tabBarInactiveTintColor: Colors.tabInactive,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
+        tabBarActiveTintColor: '#00C896',
+        tabBarInactiveTintColor: 'rgba(255,255,255,0.40)',
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
       }}
     >
       <Tabs.Screen

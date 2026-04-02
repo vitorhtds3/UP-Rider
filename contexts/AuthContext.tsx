@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, ReactNode } from 'react';
-import { AppState, Platform } from 'react-native';
+import { AppState } from 'react-native';
 import * as Location from 'expo-location';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/services/supabase';
@@ -29,7 +29,6 @@ interface AuthContextType {
   login: (email: string, senha: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   updateEntregador: (data: Partial<Entregador>) => void;
-  refreshUserData: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -39,13 +38,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Handle app state for session refresh
   useEffect(() => {
-    // On web the app frequently loses focus (iframes, tab switches, etc.)
-    // so we never stop auto-refresh there — the token would expire silently.
-    if (Platform.OS === 'web') {
-      supabase.auth.startAutoRefresh();
-      return;
-    }
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         supabase.auth.startAutoRefresh();
@@ -56,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.remove();
   }, []);
 
+  // Initialize session
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -81,50 +76,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchEntregadorData = async (userId: string) => {
     try {
-      // All user info comes from auth metadata (no users table needed)
-      const { data: authResp } = await supabase.auth.getUser();
-      const meta = authResp?.user?.user_metadata || {};
+      // Fetch user data from public.users table
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-      // Fetch driver profile via SECURITY DEFINER RPC to bypass RLS
-      const { data: driverRpc } = await supabase
-        .rpc('get_driver_status', { p_user_id: userId })
-        .maybeSingle();
+      if (userError || !userData) {
+        setIsLoading(false);
+        return;
+      }
 
-      // Also try direct SELECT (works if SELECT policy is in place)
-      const { data: driverDirect } = await supabase
+      // Fetch driver data
+      const { data: driverData } = await supabase
         .from('drivers')
-        .select('id, user_id, status, is_online, latitude, longitude')
+        .select('*')
         .eq('user_id', userId)
-        .maybeSingle();
+        .single();
 
-      const driverStatus  = driverRpc?.drv_status  || driverDirect?.status  || 'pending';
-      const driverOnline  = driverRpc?.drv_is_online ?? driverDirect?.is_online ?? false;
-      const driverDbId    = driverRpc?.drv_id       || driverDirect?.id;
+      // Compute today's earnings from completed orders
+      const today = new Date().toISOString().split('T')[0];
+      const { data: ordersToday } = await supabase
+        .from('orders')
+        .select('total')
+        .eq('driver_id', userId)
+        .eq('status', 'delivered')
+        .gte('created_at', today);
 
-      console.log('[Auth] meta:', `name=${meta.name}, status=${meta.status}`);
-      console.log('[Auth] driverData:', `status=${driverStatus}, is_online=${driverOnline}, driver_id=${driverDbId}`);
+      const ganhosDia = (ordersToday || []).reduce((sum: number, o: any) => sum + (Number(o.delivery_fee) || Number(o.total) * 0.15 || 0), 0);
 
-      // accountStatus: drivers.status is the source of truth for approval
-      const accountStatus = driverStatus || meta.status || 'pending';
-      console.log('[Auth] accountStatus resolved to:', accountStatus);
+      // Count today's deliveries
+      const { count: entregasHoje } = await supabase
+        .from('orders')
+        .select('*', { count: 'exact', head: true })
+        .eq('driver_id', userId)
+        .eq('status', 'delivered')
+        .gte('created_at', today);
 
       setEntregador({
         id: userId,
         user_id: userId,
-        nome: meta.name || '',
-        email: authResp?.user?.email || '',
-        telefone: meta.phone || '',
-        veiculo: meta.vehicle || 'Moto',
+        nome: userData.name || '',
+        email: userData.email || '',
+        telefone: userData.phone || '',
+        veiculo: driverData?.vehicle_type || 'Moto',
         foto: '',
-        status: driverOnline ? 'online' : 'offline',
-        ganhos_dia: 0,
-        entregas_hoje: 0,
-        driver_id: driverDbId,
-        role: meta.role || 'driver',
-        accountStatus,
+        status: driverData?.is_online ? 'online' : 'offline',
+        ganhos_dia: ganhosDia,
+        entregas_hoje: entregasHoje || 0,
+        driver_id: driverData?.id,
+        role: userData.role,
+        accountStatus: userData.status,
       });
     } catch (e) {
-      console.error('[Auth] Erro ao buscar dados:', e);
+      console.error('Erro ao buscar dados do entregador:', e);
     } finally {
       setIsLoading(false);
     }
@@ -147,26 +153,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: 'Erro ao iniciar sessao.' };
     }
 
-    // Role check from auth metadata only (no users table)
-    const role = data.user?.user_metadata?.role;
-    if (role && role !== 'driver') {
+    // Verify this user is a driver
+    const { data: userData } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', data.session.user.id)
+      .single();
+
+    if (userData && userData.role !== 'driver') {
       await supabase.auth.signOut();
       setIsLoading(false);
       return { success: false, error: 'Acesso restrito a entregadores.' };
     }
 
+    // Register push token after successful login
     registerForPushNotifications(data.session.user.id).catch(console.error);
+
     return { success: true };
   };
 
-  const refreshUserData = async () => {
-    const { data: { session: currentSession } } = await supabase.auth.getSession();
-    if (currentSession?.user?.id) {
-      await fetchEntregadorData(currentSession.user.id);
-    }
-  };
-
   const logout = async () => {
+    // Remove push token on logout
     if (entregador?.user_id) {
       await removePushToken(entregador.user_id);
     }
@@ -178,81 +185,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateEntregador = async (data: Partial<Entregador>) => {
     if (!entregador) return;
 
+    // Update local state immediately
     setEntregador({ ...entregador, ...data });
 
-    // Sync online/offline to drivers table
-    if (data.status !== undefined) {
+    // Sync status (online/offline) to drivers table
+    if (data.status !== undefined && entregador.driver_id) {
       const isOnlineNow = data.status === 'online';
+      await supabase
+        .from('drivers')
+        .update({ is_online: isOnlineNow, last_update: new Date().toISOString() })
+        .eq('id', entregador.driver_id);
 
-      const { error: rpcErr } = await supabase.rpc('set_driver_online', {
-        p_user_id: entregador.user_id,
-        p_is_online: isOnlineNow,
-      });
-
-      if (rpcErr) {
-        const { error: updateErr } = await supabase
-          .from('drivers')
-          .update({ is_online: isOnlineNow, last_update: new Date().toISOString() })
-          .eq('user_id', entregador.user_id);
-        if (updateErr) {
-          console.warn('[Auth] is_online sync failed:', updateErr.message);
-        }
-      }
-
+      // Start or stop location tracking
       if (isOnlineNow) {
-        startLocationTracking(entregador.user_id);
+        startLocationTracking(entregador.driver_id);
       } else {
         stopLocationTracking();
       }
     }
 
-    // Sync name/phone to auth metadata (no users table)
-    if (data.nome || data.telefone) {
-      const metaUpdate: any = {};
-      if (data.nome) metaUpdate.name = data.nome;
-      if (data.telefone) metaUpdate.phone = data.telefone;
-      await supabase.auth.updateUser({ data: metaUpdate });
+    // Sync profile fields to users table
+    const userUpdates: any = {};
+    if (data.nome) userUpdates.name = data.nome;
+    if (data.telefone) userUpdates.phone = data.telefone;
+
+    if (Object.keys(userUpdates).length > 0) {
+      await supabase
+        .from('users')
+        .update(userUpdates)
+        .eq('id', entregador.user_id);
+    }
+
+    // Sync vehicle type to drivers table
+    if (data.veiculo && entregador.driver_id) {
+      await supabase
+        .from('drivers')
+        .update({ vehicle_type: data.veiculo })
+        .eq('id', entregador.driver_id);
     }
   };
 
+  // Location tracking
   const locationSubscriptionRef = React.useRef<Location.LocationSubscription | null>(null);
-  const webWatchIdRef = React.useRef<number | null>(null);
 
-  const stopLocationTracking = () => {
-    if (locationSubscriptionRef.current) {
-      locationSubscriptionRef.current.remove();
-      locationSubscriptionRef.current = null;
-    }
-    if (typeof navigator !== 'undefined' && navigator.geolocation && webWatchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(webWatchIdRef.current);
-      webWatchIdRef.current = null;
-    }
-  };
-
-  const startLocationTracking = async (userId: string) => {
+  const startLocationTracking = async (driverId: string) => {
     stopLocationTracking();
-
-    if (Platform.OS === 'web') {
-      if (typeof navigator === 'undefined' || !navigator.geolocation) return;
-      webWatchIdRef.current = navigator.geolocation.watchPosition(
-        async (pos) => {
-          await supabase
-            .from('drivers')
-            .update({
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-              last_update: new Date().toISOString(),
-            })
-            .eq('user_id', userId);
-        },
-        (err) => console.warn('[Location] Web geolocation error:', err.message),
-        { enableHighAccuracy: false, maximumAge: 30000, timeout: 15000 }
-      );
-      return;
-    }
-
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') return;
+
     locationSubscriptionRef.current = await Location.watchPositionAsync(
       { accuracy: Location.Accuracy.High, distanceInterval: 50, timeInterval: 30000 },
       async (location) => {
@@ -263,11 +243,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             longitude: location.coords.longitude,
             last_update: new Date().toISOString(),
           })
-          .eq('user_id', userId);
+          .eq('id', driverId);
       }
     );
   };
 
+  const stopLocationTracking = () => {
+    if (locationSubscriptionRef.current) {
+      locationSubscriptionRef.current.remove();
+      locationSubscriptionRef.current = null;
+    }
+  };
+
+  // Stop tracking on unmount
   useEffect(() => {
     return () => stopLocationTracking();
   }, []);
@@ -275,7 +263,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAuthenticated = !!session && !!entregador;
 
   return (
-    <AuthContext.Provider value={{ entregador, session, isAuthenticated, isLoading, login, logout, updateEntregador, refreshUserData }}>
+    <AuthContext.Provider value={{ entregador, session, isAuthenticated, isLoading, login, logout, updateEntregador }}>
       {children}
     </AuthContext.Provider>
   );

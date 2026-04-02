@@ -1,39 +1,20 @@
 import * as Notifications from 'expo-notifications';
-import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
 
-// Configure how notifications appear when the app is in foreground
+// Configure how notifications appear when app is in foreground
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
   }),
 });
-
-async function ensureAndroidChannel() {
-  if (Platform.OS !== 'android') return;
-  await Notifications.setNotificationChannelAsync('pedidos', {
-    name: 'Novos Pedidos',
-    description: 'Notificacoes de novos pedidos disponiveis',
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#FF6B2B',
-    sound: 'default',
-    enableVibrate: true,
-    showBadge: true,
-  });
-}
 
 export async function registerForPushNotifications(userId: string): Promise<string | null> {
   if (Platform.OS === 'web') return null;
 
   try {
-    await ensureAndroidChannel();
-
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 
@@ -43,26 +24,25 @@ export async function registerForPushNotifications(userId: string): Promise<stri
     }
 
     if (finalStatus !== 'granted') {
-      console.log('[Push] Permissao negada pelo usuario');
+      console.log('Permissao de notificacoes negada');
       return null;
     }
 
-    const projectId =
-      Constants.expoConfig?.extra?.eas?.projectId ??
-      Constants.easConfig?.projectId ??
-      process.env.EXPO_PUBLIC_PROJECT_ID;
-
-    if (!projectId || projectId === 'SEU_PROJECT_ID_AQUI') {
-      console.warn('[Push] EAS projectId nao configurado — push nao funcionara em producao');
-      return null;
+    // Android requires notification channel
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('pedidos', {
+        name: 'Novos Pedidos',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#FF6B2B',
+        sound: 'default',
+      });
     }
 
-    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
+    const tokenData = await Notifications.getExpoPushTokenAsync();
     const token = tokenData.data;
 
-    console.log('[Push] Token obtido:', token);
-
-    // Save/update token in push_tokens table
+    // Save token to push_tokens table (upsert by token)
     const { error } = await supabase
       .from('push_tokens')
       .upsert(
@@ -76,14 +56,14 @@ export async function registerForPushNotifications(userId: string): Promise<stri
       );
 
     if (error) {
-      console.error('[Push] Erro ao salvar token:', error.message);
+      console.error('Erro ao salvar push token:', error.message);
     } else {
-      console.log('[Push] Token salvo com sucesso');
+      console.log('Push token salvo:', token);
     }
 
     return token;
-  } catch (e: any) {
-    console.error('[Push] Erro ao registrar:', e?.message ?? e);
+  } catch (e) {
+    console.error('Erro ao registrar notificacoes:', e);
     return null;
   }
 }
@@ -91,16 +71,8 @@ export async function registerForPushNotifications(userId: string): Promise<stri
 export async function removePushToken(userId: string): Promise<void> {
   if (Platform.OS === 'web') return;
   try {
-    const projectId =
-      Constants.expoConfig?.extra?.eas?.projectId ??
-      Constants.easConfig?.projectId ??
-      process.env.EXPO_PUBLIC_PROJECT_ID;
-
-    if (!projectId || projectId === 'SEU_PROJECT_ID_AQUI') return;
-
-    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
+    const tokenData = await Notifications.getExpoPushTokenAsync();
     const token = tokenData.data;
-
     await supabase
       .from('push_tokens')
       .delete()
@@ -114,9 +86,7 @@ export async function showLocalNotification(
   body: string,
   channelId = 'pedidos'
 ): Promise<void> {
-  if (Platform.OS === 'web') return;
   try {
-    await ensureAndroidChannel();
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
@@ -124,9 +94,9 @@ export async function showLocalNotification(
         sound: true,
         ...(Platform.OS === 'android' ? { channelId } : {}),
       },
-      trigger: null,
+      trigger: null, // Show immediately
     });
   } catch (e) {
-    console.error('[Push] Erro ao exibir notificacao local:', e);
+    console.error('Erro ao exibir notificacao local:', e);
   }
 }
